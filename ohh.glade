@@ -250,13 +250,6 @@
                       </widget>
                     </child>
                     <child>
-                      <widget class="GtkMenuItem" id="menu_editing_pos_history">
-                        <property name="visible">True</property>
-                        <property name="label" translatable="yes">Editing positions history</property>
-                        <property name="use_underline">True</property>
-                      </widget>
-                    </child>
-                    <child>
                       <widget class="GtkMenuItem" id="menu_files_history">
                         <property name="visible">True</property>
                         <property name="label" translatable="yes">Editing files history</property>
