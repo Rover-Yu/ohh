@@ -1535,8 +1535,13 @@ def startup(project_dir=None):
 	Ohh_UI(project_dir)
 	gtk.main()
 
-if len(sys.argv) > 1:
-	for project_dir in sys.argv[1:]:
+if __name__ == "__main__":
+	if len(sys.argv) == 1:
+		all_project_dir = [None]
+	else:
+		all_project_dir = sys.argv[1:]
+
+	for project_dir in all_project_dir:
 		child = os.fork()
 		if 0 == child:
 			import glib
@@ -1547,13 +1552,3 @@ if len(sys.argv) > 1:
 			import gtk.glade
 			import gtk.gdk
 			startup(project_dir)
-else:
-	import glib
-	import gobject
-	import gtksourceview2 as gtksv
-	import gio
-	import gtk
-	import gtk.glade
-	import gtk.gdk
-	startup()
-
