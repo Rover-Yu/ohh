@@ -28,6 +28,8 @@ import indexer
 import dircache
 import os.path
 import re
+import fcntl
+import time
 
 INSTALL_PATH = "/home/li/src/python/ohh" + "/"
 
@@ -53,19 +55,9 @@ class Ohh_UI:
 			self.project_current_uri = "file:" + project_dir
 			self.project_switch(project_dir)
 			return
-		#DBG
-		"""
-		#cwd = "/data/sources/kernels/linux-2.6.26"
-		cwd = "/data/sources/kernels/linux-2.6.18.x86_64"
-		self.project_current_uri = "file:" + cwd
-		self.project_switch(cwd)
-		"""
-		cwd = "/home/sailor/src/apsara/"
-		self.project_current_uri = "file:" + cwd
-		self.project_switch(cwd)
-		self.load_one_source(cwd + "/kuafu/kuafu2/kuafu2_rpcclient.cpp")
-		self.load_one_source(cwd + "/kuafu/kuafu2/kuafu2_rpcserver.cpp")
-		self.load_one_source(cwd + "/kuafu/kuafu2/kuafu2.cpp")
+		else:
+			self.load_last_project()
+			return
 
 	def setup_gui(self):
 		self.main_win.set_icon_from_file(INSTALL_PATH + "o.png")
@@ -261,17 +253,18 @@ class Ohh_UI:
 		nbook = hpaned.get_child2()
 		if not nbook:	return ""
 		n = nbook.get_current_page()
+		if n < 0: return ""
 		swin = nbook.get_nth_page(n)
 		if not swin:	return ""
-
 		fn = swin.get_data("filename")
 		return fn
 
-	def get_current_lineno(self):
+	def get_current_lineno(self, n = -1):
 		hpaned = self.xml.get_widget("hpaned")
 		nbook = hpaned.get_child2()
 		if not nbook:	return ""
-		n = nbook.get_current_page()
+		if n == -1:
+			n = nbook.get_current_page()
 		swin = nbook.get_nth_page(n)
 		if not swin:	return ""
 
@@ -616,6 +609,8 @@ class Ohh_UI:
 		self.add_sourceview(sv, fn, lineno)
 		if lineno:
 			self.scroll_in_sourceview(sv, lineno, 10)
+		else:
+			self.scroll_in_sourceview(sv, 0, 0)
 		cbox = self.xml.get_widget("cbox_filenames")
 		store = cbox.get_model()
 		iter = store.prepend()
@@ -628,7 +623,8 @@ class Ohh_UI:
 		if cur_fn:
 			self.files_history_record(cur_fn)
 			if cur_lineno:
-				self.editing_pos_history_record(cur_fn, cur_lineno)
+				print cur_fn, cur_lineno
+				self.prev_next_history.record((cur_fn, cur_lineno))
 		fn = os.path.normpath(fn)
 		if fn in self.opened_files: # this source is opened, so activate it here
 			self.reload_opened_source(fn, lineno)
@@ -810,7 +806,63 @@ class Ohh_UI:
 		else:
 			self.load_one_source(fs_path)
 
+	def load_last_project(self):
+		try:
+			rc = open("%s/.ohh.rc" % os.getenv("HOME"))
+			prev_rc = rc.read()
+			rc.close()
+			prev_rc = prev_rc.strip()
+			if prev_rc:
+				exec("prev_rc="+prev_rc)
+			else:
+				prev_rc = {}
+		except IOError:
+			prev_rc = {}
+		if not prev_rc:
+			return
+		project_uri = ""
+		project_time = 0
+		for proj in prev_rc:
+			if prev_rc[proj]["time"] > project_time:
+				project_uri = proj
+				project_time = prev_rc[proj]["time"]
+		self.project_current_uri = project_uri
+		if self.project_switch(project_uri[len("file:"):]):
+			return
+		for fn in prev_rc[project_uri]["opened"]:
+			self.load_one_source(fn)
+		mi = self.xml.get_widget("menuitem_symbol_preview_switch")
+		mi.set_active(prev_rc[project_uri]["preview"])
+		cbox = self.xml.get_widget("cbox_side_bar")
+		cbox.set_active(prev_rc[project_uri][ "outline" ])
+		self.prev_next_history.clear()
+
+	def save_current_project(self):
+		saveinfo = { }
+		mi = self.xml.get_widget("menuitem_symbol_preview_switch")
+		saveinfo[ "preview" ] = mi.get_active()
+		saveinfo[ "opened" ] = self.opened_files
+		saveinfo[ "time" ] = int(time.time())
+		cbox = self.xml.get_widget("cbox_side_bar")
+		saveinfo[ "outline" ] = cbox.get_active()
+		try:
+			rc = open("%s/.ohh.rc" % os.getenv("HOME"))
+			prev_rc = rc.read()
+			rc.close()
+			prev_rc = prev_rc.strip()
+			if prev_rc:
+				exec("prev_rc="+prev_rc)
+			else:
+				prev_rc = {}
+		except IOError:
+			prev_rc = {}
+		prev_rc[self.project_current_uri] = saveinfo
+		rc = open("%s/.ohh.rc" % os.getenv("HOME"), "w")
+		rc.write(str(prev_rc))
+		rc.close()
+
 	def on_quit(self, *data):
+		self.save_current_project()
 		sys.exit()
 
 	def current_symbol(self):
@@ -903,9 +955,8 @@ class Ohh_UI:
 		self.setup_search_window(3, sym)
 		search_win.show_all()
 
-	def on_clear_all_history(self, data):
-		for name in ("menu_editing_pos_history",
-				"menu_files_history",
+	def on_clear_all_history(self, *data):
+		for name in ("menu_files_history",
 				"menu_def_history",
 				"menu_ref_history"):
 			mi = self.xml.get_widget(name)
@@ -1383,15 +1434,6 @@ class Ohh_UI:
 		self.setup_search_window(search_type, sym)
 		search_win.show_all()
 
-	def editing_pos_history_record(self, fn, lineno):
-		name = "menu_editing_pos_history"
-		label = "%s:%d" % (fn, lineno)
-		mi = self.add_one_submenuitem(name, label)
-		if mi:
-			mi.connect("activate", self.on_pos_history_menu_activate, (fn, lineno))
-			self.prev_next_history.record((fn, lineno))
-		self.files_history_record(fn)
-
 	def files_history_record(self, fn):
 		name = "menu_files_history"
 		mi = self.add_one_submenuitem(name, fn)
@@ -1429,8 +1471,10 @@ class Ohh_UI:
 		iter = cbox.get_active_iter()
 		if not iter:	return
 		fn = store.get_value(iter, 0)
-		self.load_one_source(fn.encode("utf8"))
-		self.on_cbox_side_bar_changed() #update outline if needed
+		cur_fn = self.get_current_filename()
+		if cur_fn != fn:
+			self.load_one_source(fn.encode("utf8"))
+			self.on_cbox_side_bar_changed() #update outline if needed
 
 	def on_result_window_key_release_event(self, win, evt, *data):
 		if 65307 ==  evt.keyval: # XXX: this is 'Esc'
