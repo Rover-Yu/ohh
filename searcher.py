@@ -124,8 +124,7 @@ class Searcher(object):
 	def search_caller(self, sym):
 		return self.common_impl("search_caller", sym)
 
-
-if __name__ == "__main__":
+def test_searcher():
 	import sys
 	testbed = "/data/sources/kernels/linux-2.6.26"
 	s = Searcher(testbed)
@@ -133,3 +132,14 @@ if __name__ == "__main__":
 		print "D", fn, caller, lineno, attrtab
 	for fn, caller, lineno, attrtab in  s.search_ref(sys.argv[2]):
 		print "R", fn, caller, lineno, attrtab
+
+def test_history():
+	h = History()
+	h.record(("f1", 1))
+	h.record(("f2", 2))
+	print h.prev()
+	print h.next()
+
+if __name__ == "__main__":
+	#test_searcher()
+	test_history()
