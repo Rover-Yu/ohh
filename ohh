@@ -1,0 +1,1559 @@
+#!/usr/bin/env python
+#
+#    Ohh! -- A handy cscope & ctags GUI shell.
+#
+#    Copyright (C) 2010  Li Yu
+#
+#
+#    This program is free software; you can redistribute it and/or modify
+#    it under the terms of the GNU General Public License as published by
+#    the Free Software Foundation; either version 2 of the License, or
+#    (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program; if not, write to the Free Software
+#    Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
+#
+#
+
+import sys
+import threading
+import searcher
+import indexer
+import dircache
+import os.path
+import re
+
+INSTALL_PATH = "/home/li/src/python/ohh" + "/"
+
+class Ohh_UI:
+	def __init__(self, project_dir = None):
+		xml = gtk.glade.XML(INSTALL_PATH + 'ohh.glade')
+		xml.signal_autoconnect(self)
+		self.main_win = xml.get_widget("main_window")
+#		self.main_win.maximize()
+		self.main_win.set_size_request(800, 600)
+		self.main_win.show_all()
+		self.xml = xml
+		self.searcher = None
+		self.prev_next_history = searcher.History()
+		self.project_current_uri = None
+		self.opened_files = []
+		self.prev_current_symbol = None
+		glib.timeout_add(1000, self.check_search_results)
+		self.background_search_sym_results = []
+		self.background_search_sym_results_lock = threading.Lock()
+		self.setup_gui()
+		if project_dir:
+			self.project_current_uri = "file:" + project_dir
+			self.project_switch(project_dir)
+			return
+		#DBG
+		"""
+		#cwd = "/data/sources/kernels/linux-2.6.26"
+		cwd = "/data/sources/kernels/linux-2.6.18.x86_64"
+		self.project_current_uri = "file:" + cwd
+		self.project_switch(cwd)
+		"""
+		cwd = "/home/sailor/src/apsara/"
+		self.project_current_uri = "file:" + cwd
+		self.project_switch(cwd)
+		self.load_one_source(cwd + "/kuafu/kuafu2/kuafu2_rpcclient.cpp")
+		self.load_one_source(cwd + "/kuafu/kuafu2/kuafu2_rpcserver.cpp")
+		self.load_one_source(cwd + "/kuafu/kuafu2/kuafu2.cpp")
+
+	def setup_gui(self):
+		self.main_win.set_icon_from_file(INSTALL_PATH + "o.png")
+		# side bar is filesystem view default
+		self.setup_side_bar()
+		# turn on side bar default
+		hpaned = self.xml.get_widget("hpaned")
+		hpaned.set_position(200)
+		# close symbol preview "frame"
+		vpaned = self.xml.get_widget("vpaned")
+		maxp = vpaned.get_property("max-position")
+		vpaned.set_position(maxp)
+		# setup cbox_filenames
+		cbox = self.xml.get_widget("cbox_filenames")
+	        renderer = gtk.CellRendererText()
+		renderer.set_property("xalign", 0.0)
+		cbox.pack_start(renderer, True)
+		cbox.set_attributes(renderer, text = 0)
+		store = gtk.ListStore(gobject.TYPE_STRING)
+		cbox.set_model(store)
+		cbox.connect("changed", self.on_cbox_filenames_changed)
+		
+		search_win = self.xml.get_widget("search_window")
+		search_win.set_icon_from_file(INSTALL_PATH + "o.png")
+		search_win.connect("key-release-event", self.on_search_window_key_release_event)
+		search_win.connect("delete-event", self.on_search_window_delete_event)
+		# setup cbox_search_type
+		cbox = self.xml.get_widget("cbox_search_type")
+	        renderer = gtk.CellRendererText()
+		renderer.set_property("xalign", 0.0)
+		cbox.pack_start(renderer, True)
+		cbox.set_attributes(renderer, text=0)
+		store = gtk.TreeStore(gobject.TYPE_STRING, gobject.TYPE_INT)
+		cbox.set_model(store)
+		iter = store.append(None)
+		store.set(iter, 0, "Search for definitions", 1, 0)
+		iter = store.append(None)
+		store.set(iter, 0, "Search for references", 1, 1)
+		iter = store.append(None)
+		store.set(iter, 0, "Search for regular expression", 1, 2)
+		iter = store.append(None)
+		store.set(iter, 0, "Find regular expression in current source", 1, 3)
+		iter = store.append(None)
+		store.set(iter, 0, "Search what call me", 1, 4)
+		# setup cbentry_symbol
+		def on_enter(cbentry, ev, *data):
+			self = data[-1]
+			if ev.type == gtk.gdk.KEY_RELEASE and ev.keyval == 65293: # XXX: hardcode for Enter
+				self.on_btn_search_start_clicked()
+			return True
+		cbentry = self.xml.get_widget("cbentry_symbol")
+		cbentry.set_text_column(0)
+		store = gtk.ListStore(gobject.TYPE_STRING)
+		cbentry.set_model(store)
+		cbentry.connect("key-release-event", on_enter, self)
+
+		self.setup_shortcuts()
+
+	def setup_shortcuts(self):
+		accel_group = gtk.AccelGroup()
+		self.main_win.add_accel_group(accel_group)
+		keyval_up =    65362  # --> Up arrow
+		keyval_down =  65364  # --> Down arrow
+		keyval_left =  65361  # --> Left arrow
+		keyval_right = 65363  # --> Right arrow
+
+		w = self.xml.get_widget("menuitem_project_switch")
+		w.add_accelerator("activate", accel_group, ord('w'), gtk.gdk.CONTROL_MASK, gtk.ACCEL_VISIBLE)
+		w = self.xml.get_widget("menuitem_search_def")
+		w.add_accelerator("activate", accel_group, ord('d'), gtk.gdk.CONTROL_MASK, gtk.ACCEL_VISIBLE)
+		w = self.xml.get_widget("menuitem_search_ref")
+		w.add_accelerator("activate", accel_group, ord('r'), gtk.gdk.CONTROL_MASK, gtk.ACCEL_VISIBLE)
+		w = self.xml.get_widget("menuitem_search_regex")
+		w.add_accelerator("activate", accel_group, ord('e'), gtk.gdk.CONTROL_MASK, gtk.ACCEL_VISIBLE)
+		w = self.xml.get_widget("menuitem_prev")
+		w.add_accelerator("activate", accel_group, keyval_left, gtk.gdk.CONTROL_MASK, gtk.ACCEL_VISIBLE)
+		w = self.xml.get_widget("menuitem_next")
+		w.add_accelerator("activate", accel_group, keyval_right, gtk.gdk.CONTROL_MASK, gtk.ACCEL_VISIBLE)
+		w = self.xml.get_widget("menuitem_local_find")
+		w.add_accelerator("activate", accel_group, ord('f'), gtk.gdk.CONTROL_MASK, gtk.ACCEL_VISIBLE)
+		w = self.xml.get_widget("menuitem_symlist")
+		w.add_accelerator("activate", accel_group, ord('l'), gtk.gdk.CONTROL_MASK, gtk.ACCEL_VISIBLE)
+		w = self.xml.get_widget("menuitem_save_all_sources")
+		w.add_accelerator("activate", accel_group, ord('s'), gtk.gdk.CONTROL_MASK|gtk.gdk.SHIFT_MASK,\
+				gtk.ACCEL_VISIBLE)
+		w = self.xml.get_widget("menuitem_save_source")
+		w.add_accelerator("activate", accel_group, ord('s'), gtk.gdk.CONTROL_MASK, gtk.ACCEL_VISIBLE)
+		w = self.xml.get_widget("menuitem_what_call_me")
+		w.add_accelerator("activate", accel_group, keyval_up, gtk.gdk.CONTROL_MASK, gtk.ACCEL_VISIBLE)
+		w = self.xml.get_widget("menuitem_what_i_call")
+		w.add_accelerator("activate", accel_group, keyval_down, gtk.gdk.CONTROL_MASK, gtk.ACCEL_VISIBLE)
+		w = self.xml.get_widget("menuitem_symbol_preview_switch")
+		w.add_accelerator("activate", accel_group, ord('p'), gtk.gdk.CONTROL_MASK, gtk.ACCEL_VISIBLE)
+
+	def on_symbol_preview_switch(self, mi):
+		if mi.get_active():
+			self.show_status("Symbol preview enabled")
+			self.startup_preview()
+		else:
+			self.show_status("Symbol preview disabled")
+
+	def on_close_source(self, mi = None, page_num = -1):
+		hpaned = self.xml.get_widget("hpaned")
+		nbook = hpaned.get_child2()
+		if not nbook:	return False
+		if page_num == -1:
+			page_num = nbook.get_current_page()
+		swin = nbook.get_nth_page(page_num)
+		fn = swin.get_data("filename")
+		sv = swin.get_data("editor")
+		buffer = sv.get_buffer()
+		if not buffer.get_modified() or self.show_yes_no("%s is modified, close it anyway?" % fn):
+			nbook.remove_page(page_num)
+			self.opened_files.remove(fn)
+			return True
+		return False
+
+	def on_save_source(self, *data):
+		hpaned = self.xml.get_widget("hpaned")
+		nbook = hpaned.get_child2()
+		if not nbook:	return ""
+		i = nbook.get_current_page()
+		swin = nbook.get_nth_page(i)
+		if not swin:	return ""
+		fn = swin.get_data("filename")
+		sv = swin.get_data("editor")
+		buffer = sv.get_buffer()
+		start = buffer.get_start_iter()
+		end = buffer.get_end_iter()
+		content = buffer.get_text(start, end)
+		file(fn, "w").write(content)
+		buffer.set_modified(False)
+
+	def on_save_all_sources(self, *data):
+		hpaned = self.xml.get_widget("hpaned")
+		nbook = hpaned.get_child2()
+		if not nbook:	return ""
+		n = nbook.get_n_pages()
+		for i in range(n):
+			swin = nbook.get_nth_page(i)
+			if not swin:	return ""
+			fn = swin.get_data("filename")
+			sv = swin.get_data("editor")
+			buffer = sv.get_buffer()
+			start = buffer.get_start_iter()
+			end = buffer.get_end_iter()
+			content = buffer.get_text(start, end)
+			file(fn, "w").write(content)
+			buffer.set_modified(False)
+
+	def setup_side_bar(self):
+		nbook_side_bar = self.xml.get_widget("notebook_side_bar")
+
+		cbox = self.xml.get_widget("cbox_side_bar")
+		store = gtk.ListStore(gobject.TYPE_STRING, gobject.TYPE_INT)
+		cbox.set_model(store)
+	        renderer = gtk.CellRendererText()
+		renderer.set_property("xalign", 0.0)
+		cbox.pack_start(renderer, True)
+		cbox.set_attributes(renderer, text=0)
+		iter = store.append(None)
+		store.set(iter, 0, "Filesystem", 1, 0)
+		nbook_side_bar.set_current_page(0)
+
+		iter = store.append(None)
+		store.set(iter, 0, "Outline", 1, 0)
+		cbox.set_active(0)
+		swin = gtk.ScrolledWindow()
+		swin.set_policy(gtk.POLICY_AUTOMATIC, gtk.POLICY_AUTOMATIC)
+		tv = gtk.TreeView()
+		tv.connect("row-activated", self.on_outline_activated)
+		tv.set_headers_visible(False)
+		tv.set_rules_hint(True)
+		tv.set_grid_lines(True)
+	        renderer = gtk.CellRendererText()
+		renderer.set_property("xalign", 0.0)
+	        column = gtk.TreeViewColumn("", renderer, text=0)
+		column.set_clickable(True)
+		tv.append_column(column)
+		swin.add(tv)
+		swin.set_data("tv_outline", tv)
+		nbook_side_bar.append_page(swin)
+
+	def on_outline_activated(self, tv, path, column):
+		store = tv.get_model()
+		iter = store.get_iter(path)
+		lineno = store.get_value(iter, 1)
+		fn = self.get_current_filename()
+		self.load_one_source(fn, lineno)
+
+	def get_current_filename(self):
+		hpaned = self.xml.get_widget("hpaned")
+		nbook = hpaned.get_child2()
+		if not nbook:	return ""
+		n = nbook.get_current_page()
+		swin = nbook.get_nth_page(n)
+		if not swin:	return ""
+
+		fn = swin.get_data("filename")
+		return fn
+
+	def get_current_lineno(self):
+		hpaned = self.xml.get_widget("hpaned")
+		nbook = hpaned.get_child2()
+		if not nbook:	return ""
+		n = nbook.get_current_page()
+		swin = nbook.get_nth_page(n)
+		if not swin:	return ""
+
+		sv = swin.get_data("editor")
+
+		buffer = sv.get_buffer()
+		mark = buffer.get_insert()
+		iter = buffer.get_iter_at_mark(mark)
+		start = buffer.get_start_iter()
+		text = buffer.get_text(start, iter)
+		return text.count("\n") + 1
+
+	def project_switch(self, cwd):
+		cwd = os.path.abspath(cwd)
+		## XXX: below checks should be do in searcher.Searcher(cwd)
+		if not os.path.exists(cwd + "/cscope.out"):
+			return cwd + "/cscope.out does not exist!"
+		if not os.path.exists(cwd + "/tags"):
+			return cwd + "/tags does not exist!"
+		self.searcher = searcher.Searcher(cwd)
+		if not self.load_filesystem_side_bar():
+			return "failed to list directory [%s] content" % cwd
+		self.show_status("Switch into " + os.path.normpath(cwd))
+		title = self.main_win.get_title()
+		if "-" in title:
+			title = title.split("-")[0] + " "
+		self.main_win.set_title(title.strip() + " - " + os.path.normpath(cwd))
+
+	def show_yes_no(self, err_msg):
+		dlg = gtk.MessageDialog(self.main_win,  gtk.DIALOG_MODAL|gtk.DIALOG_DESTROY_WITH_PARENT, \
+				gtk.MESSAGE_WARNING,  gtk.BUTTONS_YES_NO, err_msg)
+		rep = dlg.run()
+		dlg.destroy()
+		return rep == gtk.RESPONSE_YES
+
+	def show_error(self, err_msg):
+		dlg = gtk.MessageDialog(self.main_win,  gtk.DIALOG_MODAL|gtk.DIALOG_DESTROY_WITH_PARENT, \
+				gtk.MESSAGE_ERROR,  gtk.BUTTONS_CLOSE, err_msg)
+		dlg.run()
+		dlg.destroy()
+
+	def on_project_switch(self, data):
+		while True:
+			chooser = gtk.FileChooserDialog(title="Project switch", \
+					action=gtk.FILE_CHOOSER_ACTION_SELECT_FOLDER, \
+					buttons= (gtk.STOCK_CANCEL, gtk.RESPONSE_REJECT, \
+							gtk.STOCK_OK, gtk.RESPONSE_ACCEPT))
+			chooser.set_local_only(True)
+			if self.project_current_uri:
+				chooser.set_current_folder_uri(self.project_current_uri)
+			res = chooser.run()
+			uri = chooser.get_uri()
+			chooser.destroy()
+			if res == gtk.RESPONSE_REJECT:
+				return
+			cwd = uri[len("file:"):]
+			self.project_current_uri = uri
+			err_msg = self.project_switch(cwd)
+			if not err_msg:
+				break
+			self.show_error(err_msg)
+
+		hpaned = self.xml.get_widget("hpaned")
+		nbook = hpaned.get_child2()
+		if nbook:
+			n_pages = nbook.get_n_pages()
+			while n_pages:
+				nbook.remove_page(-1)
+				n_pages -= 1
+			self.opened_files = []
+			cbox = self.xml.get_widget("cbox_filenames")
+			store = cbox.get_model()
+			iter = store.get_iter_first()
+			while iter:
+				store.remove(iter)
+				iter = store.get_iter_first()
+		cbox = self.xml.get_widget("cbox_side_bar")
+		cbox.set_active(0)
+		self.close_preview()
+
+	def load_filesystem_side_bar(self):
+		tv = self.xml.get_widget("treeview_filesystem")
+		store = gtk.TreeStore(gobject.TYPE_STRING, gobject.TYPE_STRING)
+		old = tv.get_model()
+		if not old: # first time?
+		        renderer = gtk.CellRendererText()
+			renderer.set_property("xalign", 0.0)
+		        column = gtk.TreeViewColumn("", renderer, text=0)
+			column.set_clickable(True)
+			column.set_resizable(True)
+			tv.append_column(column)
+		if self.setup_filesystem_store(store, prefix=self.project_current_uri[len("file:"):]):
+			tv.set_model(store)
+			return True
+		else:
+			return False
+
+	def item_dir_first(self, left, right):
+		path0 = self.prefix + "/" + left
+		path1 = self.prefix + "/" + right
+		is_dir0 = os.path.isdir(path0)
+		is_dir1 = os.path.isdir(path1)
+		if is_dir0 and not is_dir1:
+			return -1
+		if not is_dir0 and is_dir1:
+			return 1
+		if path0 < path1:
+			return -1
+		elif path0 > path1:
+			return 1
+		return 0
+
+	def setup_filesystem_store(self, store, prefix, parent=None):
+		try:
+			items = dircache.listdir(prefix)
+		except OSError:
+			raise
+			return False
+		self.prefix = prefix
+		items.sort(self.item_dir_first)
+		del self.prefix
+		for item in items:
+			if item.startswith("."):
+				continue
+			path = prefix + "/" + item
+			iter = store.append(parent)
+			store.set(iter, 0, os.path.basename(path).decode("utf8"), 1, path)
+			if not os.path.isdir(path):
+				continue
+			subiter = store.append(iter)
+			store.set(subiter, 0, "")
+		return True
+
+	def read_one_source(self, fn):
+		f = gio.File(fn)
+		info = f.query_info("*")
+		mime_type = info.get_content_type()
+		language = None
+		buffer = gtksv.Buffer()
+		python_lang = None
+		if mime_type:
+			lang_manager = gtksv.language_manager_get_default()
+			lang_ids = lang_manager.get_language_ids()
+			for i in lang_ids:
+				lang = lang_manager.get_language(i)
+				for m in lang.get_mime_types():
+					if m == mime_type:
+						language = lang
+				if lang.get_name() == "Python":
+					python_lang
+		if language:
+	        	buffer.set_language(language)
+			buffer.set_highlight_syntax(True)
+		begin, end = buffer.get_bounds()
+		marks = buffer.remove_source_marks(begin, end)
+		buffer.begin_not_undoable_action()
+		try:
+			txt = open(fn).read()
+		except IOError:
+		        return False
+		buffer.set_text(self.text_to_utf8(txt))
+		buffer.set_data('filename', fn)
+		buffer.end_not_undoable_action()
+		buffer.set_modified(False)
+		return buffer
+
+	def preview_one_source(self, fn, lineno):
+		buffer = self.read_one_source(fn)
+		if lineno > 0:
+			lineno -= 1 # rebase from 0
+		sv = self.create_sourceview(buffer, lineno, True)
+		sv.set_data("filename", fn)
+		sv.set_data("lineno", lineno)
+		sv.connect("button-press-event", self.on_preview_source_button_press_event)
+		self.add_preview_sourceview(sv, lineno)
+		self.scroll_in_sourceview(sv, lineno)
+
+	def add_preview_sourceview(self, sv, lineno):
+		swin = self.xml.get_widget("swin_preview")
+		child = swin.get_child()
+		if child:
+			swin.remove(child)
+		vpaned = self.xml.get_widget("vpaned")
+		maxp = vpaned.get_property("max-position")
+		pos = vpaned.get_position()
+		if pos == maxp:
+			pos = int(maxp * 65 / 100)
+			vpaned.set_position(pos)
+		sv.set_sensitive(True)
+		swin.add(sv)
+		swin.show_all()
+		while gtk.events_pending():
+			gtk.main_iteration(False)
+
+	def scroll_in_sourceview(self, sv, lineno, delta = 5):
+		buffer = sv.get_buffer()
+		total_lineno = buffer.get_line_count()
+		iter = buffer.get_iter_at_line(lineno)
+		buffer.place_cursor(iter)
+		if lineno > 0:
+			iter = buffer.get_iter_at_line(lineno + delta)
+			mark = buffer.create_mark("current", iter)
+			sv.scroll_mark_onscreen(mark)
+			while gtk.events_pending():
+				gtk.main_iteration(False)
+
+	def add_sourceview(self, sv, fn, lineno=0):
+		def on_close_sv_page(evbox, evt, self, nbook, child):
+			if 3 == evt.button:
+				# close all other sources
+				this = nbook.page_num(child)
+				total = nbook.get_n_pages()
+				for i in range(total - 1, this, -1):
+					if not self.on_close_source(page_num = i):
+						return
+				for i in range(this):
+					if not self.on_close_source(page_num = 0):
+						return
+				return
+			if 1 != evt.button:
+				return
+			# close current source
+			page_num = nbook.page_num(child)
+			fn = child.get_data("filename")
+			cbox = self.xml.get_widget("cbox_filenames")
+			store = cbox.get_model()
+			if not store:
+				return
+			swin = nbook.get_nth_page(page_num)
+			if not swin:
+				return
+			if not self.on_close_source(page_num = page_num):
+				return
+			iter = store.get_iter_first()
+			while iter and store.get_value(iter, 0) != fn.decode("utf8"):
+				iter = store.iter_next(iter)
+			if iter:
+				store.remove(iter)
+			total = nbook.get_n_pages()
+			if total == 0:
+				cbox = self.xml.get_widget("cbox_side_bar")
+				cbox.set_active(0)
+
+		def on_page_removed(nbook, page, page_num, self):
+			# after remove a source page
+			# according to possible new current page, update "cbox_filenames"
+			cbox = self.xml.get_widget("cbox_filenames")
+			if not cbox:	
+				return
+			store = cbox.get_model()
+			if not store:	
+				return
+			n = nbook.get_current_page()
+			swin = nbook.get_nth_page(n)
+			if not swin:
+				return
+			fn = swin.get_data("filename")
+			if not fn:
+				return
+			iter = store.get_iter_first()
+			while iter and store.get_value(iter, 0) != fn.decode("utf8"):
+				iter = store.iter_next(iter)
+			if iter:
+				cbox.set_model(store)
+				cbox.set_active_iter(iter)
+
+		def on_page_switch(nbook, page, page_num, self):
+			cbox = self.xml.get_widget("cbox_filenames")
+			store = cbox.get_model()
+			if not store:	return
+			swin = nbook.get_nth_page(page_num)
+			if not swin:	return
+			fn = swin.get_data("filename")
+			if not fn:	return
+			iter = store.get_iter_first()
+			while iter and store.get_value(iter, 0) != fn.decode("utf8"):
+				iter = store.iter_next(iter)
+			if iter:
+				cbox.set_active_iter(iter)
+			self.on_cbox_side_bar_changed() #update outline if needed
+
+		title = os.path.basename(fn).decode("utf8")
+		hpaned = self.xml.get_widget("hpaned")
+		nbook = hpaned.get_child2()
+		if not nbook:	# first ?
+			nbook = gtk.Notebook()
+			nbook.set_scrollable(True)
+			hpaned.pack2(nbook)
+			nbook.connect("page-removed", on_page_removed, self)
+			nbook.connect("switch-page", on_page_switch, self)
+		swin = gtk.ScrolledWindow()
+		swin.set_policy(gtk.POLICY_AUTOMATIC, gtk.POLICY_AUTOMATIC)
+		evbox = gtk.EventBox()
+		close = gtk.Image()
+		close.set_from_stock(gtk.STOCK_CLOSE, gtk.ICON_SIZE_SMALL_TOOLBAR)
+		evbox.add(close)
+		hbox = gtk.HBox()
+		hbox.set_spacing(2)
+		nbook.prepend_page(swin, hbox)
+		nbook.set_tab_reorderable(swin, True)
+		label = gtk.Label(title)
+		hbox.pack_start(label, False, False, 0)
+		hbox.pack_start(evbox, False, False, 0)
+		swin.set_data("filename", fn)
+		swin.set_data("editor", sv)
+		swin.set_data("title", label)
+		evbox.connect("button-press-event", on_close_sv_page, self, nbook, nbook.get_nth_page(0))
+		swin.add(sv)
+		hbox.show_all()
+		nbook.show_all()
+		nbook.set_current_page(0)
+		while gtk.events_pending():
+			gtk.main_iteration(False)
+		self.opened_files.append(fn)
+		self.main_win.set_focus(sv)
+
+	def reload_opened_source(self, fn, lineno = 0):
+		if lineno != 0:
+			lineno -= 1
+		hpaned = self.xml.get_widget("hpaned")
+		nbook = hpaned.get_child2()
+		n_pages = nbook.get_n_pages()
+		for n in range(n_pages):
+			swin = nbook.get_nth_page(n)
+			this_fn = swin.get_data("filename")
+			if this_fn == fn:
+				break
+		else: #oops
+			print "oops: %s is not opened?" % fn
+			return
+		sv = swin.get_data("editor")
+		if lineno:
+			self.scroll_in_sourceview(sv, lineno, 10)
+		nbook.set_current_page(n)
+		self.main_win.set_focus(sv)
+
+	def load_new_source(self, fn, lineno = 0):
+		buffer = self.read_one_source(fn)
+		if lineno > 0:
+			lineno -= 1 # rebase from 0
+		sv = self.create_sourceview(buffer, lineno)
+		self.add_sourceview(sv, fn, lineno)
+		if lineno:
+			self.scroll_in_sourceview(sv, lineno, 10)
+		cbox = self.xml.get_widget("cbox_filenames")
+		store = cbox.get_model()
+		iter = store.prepend()
+		store.set(iter, 0, fn.decode("utf8"))
+		cbox.set_active(0)
+
+	def load_one_source(self, fn, lineno = 0):
+		cur_fn = self.get_current_filename()
+		cur_lineno = self.get_current_lineno()
+		if cur_fn:
+			self.files_history_record(cur_fn)
+			if cur_lineno:
+				self.editing_pos_history_record(cur_fn, cur_lineno)
+		fn = os.path.normpath(fn)
+		if fn in self.opened_files: # this source is opened, so activate it here
+			self.reload_opened_source(fn, lineno)
+		else:
+			self.load_new_source(fn, lineno)
+
+	def show_status(self, msg):
+		sts_bar = self.xml.get_widget("status_bar")
+		sts_bar.pop(0)
+		sts_bar.push(0, msg)
+		sts_bar.show_all()
+
+	def startup_preview(self):
+		mi = self.xml.get_widget("menuitem_symbol_preview_switch")
+		if not mi.get_active():
+			return
+		sym = self.current_symbol()
+		if sym and sym != self.prev_current_symbol:
+			self.prev_current_symbol = sym
+			thr = threading.Thread(target=self.background_search_sym, args=(sym, 0, True))
+			thr.start()
+			self.show_status("Previewing '%s'" % sym)
+
+	def popup_menu(self, sv, evt_time):
+		def create_popup_menuitem(menu, stock, label, callback, data=None):
+			hbox = gtk.HBox()
+			img = gtk.Image()
+			img.set_from_stock(stock, gtk.ICON_SIZE_MENU)
+			hbox.pack_start(img, False, False, 0)
+			hbox.pack_start(gtk.Label(label), False, False, 0)
+			mi = gtk.MenuItem()
+			mi.add(hbox)
+			mi.connect("activate", callback, data)
+			menu.append(mi)
+			return mi
+		def sv_copy(mi, sv):
+			buffer = sv.get_buffer()
+			clipboard = sv.get_clipboard(gtk.gdk.SELECTION_CLIPBOARD)
+			buffer.copy_clipboard(clipboard)
+		def sv_cut(mi, sv):
+			buffer = sv.get_buffer()
+			clipboard = sv.get_clipboard(gtk.gdk.SELECTION_CLIPBOARD)
+			buffer.cut_clipboard(clipboard, sv.get_editable())
+		def sv_paste(mi, sv):
+			buffer = sv.get_buffer()
+			clipboard = sv.get_clipboard(gtk.gdk.SELECTION_CLIPBOARD)
+			buffer.paste_clipboard(clipboard, None, sv.get_editable())
+		def sv_delete(mi, sv):
+			buffer = sv.get_buffer()
+			buffer.delete_selection(True, sv.get_editable())
+		menu = gtk.Menu()
+		menu.attach_to_widget(sv, None)
+		buffer = sv.get_buffer()
+		bound = buffer.get_selection_bounds()
+		mi = create_popup_menuitem(menu, gtk.STOCK_COPY, \
+			"Copy", sv_copy, sv)
+		if not bound:
+			mi.set_sensitive(False)
+		mi = create_popup_menuitem(menu, gtk.STOCK_CUT, \
+				"Cut", sv_cut, sv)
+		if not bound:
+			mi.set_sensitive(False)
+		mi = create_popup_menuitem(menu, gtk.STOCK_DELETE, \
+				"Delete", sv_delete, sv)
+		if not bound:
+			mi.set_sensitive(False)
+		mi = create_popup_menuitem(menu, gtk.STOCK_PASTE, \
+				"Paste", sv_paste, sv)
+		clipboard = sv.get_clipboard(gtk.gdk.SELECTION_CLIPBOARD)
+		if not clipboard.wait_is_text_available():
+			mi.set_sensitive(False)
+		menu.append(gtk.SeparatorMenuItem())
+		create_popup_menuitem(menu, gtk.STOCK_DND, \
+				"Search definitions of current symbol", self.on_search_def)
+		create_popup_menuitem(menu, gtk.STOCK_DND_MULTIPLE, \
+				"Search references of current symbol", self.on_search_ref)
+		create_popup_menuitem(menu, gtk.STOCK_FIND, \
+				"Search regular expression in project", self.on_search_regex)
+		create_popup_menuitem(menu, gtk.STOCK_ZOOM_FIT, \
+				"Search regular expression in current source", self.on_local_find)
+		create_popup_menuitem(menu, gtk.STOCK_GO_UP, \
+				"Search what calls current symbol", self.on_what_call_me)
+		menu.append(gtk.SeparatorMenuItem())
+		create_popup_menuitem(menu, gtk.STOCK_SORT_ASCENDING, \
+				"Symbol list", self.on_symbol_list)
+		menu.popup(None, None, None, 3, evt_time)
+		menu.show_all()
+
+	def on_move_in_main_sv(self, sv, evt):
+		popup = False
+		if evt.type == gtk.gdk.BUTTON_PRESS and evt.button == 3:
+			self.popup_menu(sv, evt.get_time())
+			popup = True
+		self.startup_preview()
+		return popup
+
+	def show_changed_flag(self, buffer):
+		hpaned = self.xml.get_widget("hpaned")
+		nbook = hpaned.get_child2()
+		n = nbook.get_current_page()
+		swin = nbook.get_nth_page(n)
+		label = swin.get_data("title")
+		title = label.get_label()
+		sv = swin.get_data("editor")
+		buffer = sv.get_buffer()
+		if title[0] != "*" and title[-1] != "*":
+			if buffer.get_modified():
+				label.set_label("*" + title + "*")
+		elif title[0] == "*" and title[-1] == "*":
+			if not buffer.get_modified():
+				label.set_label(title[1:-1])
+
+	def create_sourceview(self, buffer, lineno = 0, is_preview = False):
+		sv = gtksv.View(buffer)
+		sv.set_draw_spaces(True)
+		sv.set_indent_on_tab(True)
+		sv.set_tab_width(8)
+		sv.set_show_line_numbers(True)
+		sv.set_show_right_margin(True)
+		sv.set_right_margin_position(80)
+		sv.set_highlight_current_line(True)
+		m = gtksv.StyleSchemeManager()
+		scheme_list = m.get_scheme_ids()
+		if scheme_list:
+			try:
+				if is_preview:
+					scheme = scheme_list[-3]
+				else:
+					scheme = scheme_list[-2]
+				scheme = m.get_scheme(scheme)
+			except IndexError:
+				scheme = None
+		else:
+			scheme = None
+		if scheme:
+			buffer.set_style_scheme(scheme)
+
+		if not is_preview:
+			sv.set_editable(True)
+			sv.connect("key-press-event", self.on_move_in_main_sv)
+			sv.connect("button-press-event", self.on_move_in_main_sv)
+			sv.connect("key-release-event", self.on_move_in_main_sv)
+			sv.connect("button-release-event", self.on_move_in_main_sv)
+			buffer.connect("modified-changed", self.show_changed_flag)
+		else:
+			sv.set_editable(False)
+		return sv
+
+	def on_filesystem_walk_down(self, tv, iter, path):
+		store = tv.get_model()
+		prefix = store.get_value(iter, 1)
+		self.setup_filesystem_store(store, prefix, iter)
+		dummy = store.iter_nth_child(iter, 0) # remove dummy iter first :)
+		store.remove(dummy)
+		return True
+
+	def on_filesystem_walk_up(self, tv, iter, path):
+		store = tv.get_model()
+		n = store.iter_n_children(iter) - 1
+		while n > 0: # keep first iter here, so user still can see an expander on parent directory
+			child = store.iter_nth_child(iter, n)
+			n -= 1
+			store.remove(child)
+		return True
+
+	def on_filesystem_activated(self, tv, path, column):
+		store = tv.get_model()
+		iter = store.get_iter(path)
+		fs_path = store.get_value(iter, 1)
+		if os.path.isdir(fs_path) and not store.iter_has_child(iter):
+			# add a dummy child here, so on_filesystem_walk_down() can take rest works well.
+			subiter = store.append(iter)
+			store.set_value(subiter, 0, "")
+		if store.iter_has_child(iter):
+			if tv.row_expanded(path):
+				tv.collapse_row(path)
+			else:
+				tv.expand_row(path, False)
+		else:
+			self.load_one_source(fs_path)
+
+	def on_quit(self, *data):
+		sys.exit()
+
+	def current_symbol(self):
+		import string
+		hpaned = self.xml.get_widget("hpaned")
+		nbook = hpaned.get_child2()
+		if not nbook:
+			return ""
+		n = nbook.get_current_page()
+		swin = nbook.get_nth_page(n)
+		if not swin:	return ""
+		sv = swin.get_data("editor")
+		buffer = sv.get_buffer()
+
+		sel = buffer.get_selection_bounds()
+		if sel: # Prefer symbol from user selection first!
+			start = sel[0]
+			end = sel[1]
+		else: 	# Then, use symbol under cursor.
+			mark = buffer.get_insert()
+			start = buffer.get_iter_at_mark(mark)
+			end = start.copy()
+		if start.get_char() not in string.ascii_letters + string.digits + "_":
+			return
+		if not sel: # we do not care the neighbour characters of user selection.
+			while start.backward_char():
+				if start.get_char() not in string.ascii_letters + string.digits + "_":
+					start.forward_char()
+					break
+			while end.forward_char():
+				if end.get_char() not in string.ascii_letters + string.digits + "_":
+					break
+		return start.get_text(end).strip()
+
+	def setup_search_window(self, search_type, sym, history=[]):
+		search_win = self.xml.get_widget("search_window")
+		search_win.set_title("Huh?")
+		cbox = self.xml.get_widget("cbox_search_type")
+		store = cbox.get_model()
+		cbox.set_active(search_type)
+		cbentry = self.xml.get_widget("cbentry_symbol")
+		cbentry.grab_focus()
+		store = cbentry.get_model()
+		if sym:
+			iter = store.get_iter_first()
+			while iter:
+				this_sym = store.get_value(iter, 0)
+				if sym == this_sym.encode("utf8"):
+					store.remove(iter)
+					break
+				iter = store.iter_next(iter)
+			iter = store.prepend()
+			store.set(iter, 0, sym.decode("utf8"))
+			cbentry.set_active(0)
+
+	def on_search_def(self, *data):
+		sym = self.current_symbol()
+		search_win = self.xml.get_widget("search_window")
+		self.setup_search_window(0, sym)
+		search_win.show_all()
+		
+	def on_search_ref(self, *data):
+		sym = self.current_symbol()
+		search_win = self.xml.get_widget("search_window")
+		self.setup_search_window(1, sym)
+		search_win.show_all()
+
+	def on_search_regex(self, *data):
+		sym = self.current_symbol()
+		search_win = self.xml.get_widget("search_window")
+		self.setup_search_window(2, sym)
+		search_win.show_all()
+
+	def on_what_call_me(self, *data):
+		sym = self.current_symbol()
+		search_win = self.xml.get_widget("search_window")
+		self.setup_search_window(4, sym)
+		search_win.show_all()
+
+	def on_what_i_call(self, *data):
+		print "what i call"
+
+	def on_local_find(self, *data):
+		cur_fn = self.get_current_filename()
+		if not cur_fn:
+			self.show_status("none current source, can't locally find!")
+			return
+		sym = self.current_symbol()
+		search_win = self.xml.get_widget("search_window")
+		self.setup_search_window(3, sym)
+		search_win.show_all()
+
+	def on_clear_all_history(self, data):
+		for name in ("menu_editing_pos_history",
+				"menu_files_history",
+				"menu_def_history",
+				"menu_ref_history"):
+			mi = self.xml.get_widget(name)
+			mi.set_submenu(None)
+		self.prev_next_history.clear()
+
+	def on_one_symbol_in_list_activated(self, tv, path, column, entry):
+		store = tv.get_model()
+		if not store:
+			return
+		iter = store.get_iter(path)
+		if not iter:
+			return
+		parent = store.iter_parent(iter)
+		if not parent: # this is a *pure* symbol line
+			parent = iter
+		else: # then load it
+			self.on_one_search_result_activated(tv, path, column)
+			return
+		if store.iter_has_child(parent): # already loaded symbol details
+			if tv.row_expanded(path):
+				tv.collapse_row(path)
+			else:
+				tv.expand_row(path, True)
+			return
+		sym = store.get_value(parent, 0)
+		sym = sym.encode("utf8")
+		results = self.searcher.search_def(sym)
+		if not results:
+			return
+		prefix = self.project_current_uri[len("file:"):] + "/"
+		for r in results:
+			iter = store.append(parent)
+			fn = r[0]
+			lineno = r[2]
+			attrtab = r[3]
+			kind = attrtab.get("kind")
+			if not kind:
+				kind = "unknown"
+			if fn.startswith(os.path.normpath(prefix)):
+				fn = fn[len(prefix)-1:]	
+			lines = file(prefix+fn).readlines() # XXX!
+			line = lines[lineno-1].strip()
+			store.set(iter, 
+				0, kind.decode("utf8"),
+				1, fn.decode("utf8"), 
+				2, str(lineno).decode("utf8"),
+				3, line.decode("utf8"),
+				4, prefix+fn)
+		tv.expand_to_path(path)
+
+	def create_symbol_list_store(self, prefix, sym_list):
+		store = gtk.TreeStore(gobject.TYPE_STRING, gobject.TYPE_STRING,
+				gobject.TYPE_STRING, gobject.TYPE_STRING, gobject.TYPE_STRING)
+		path = None
+		n = 0
+		for sym in sym_list:
+			iter = store.append(None)
+			store.set(iter, 0, sym.decode("utf8"))
+			if sym == prefix:
+				path = store.get_path(iter)
+			n += 1
+			if n > 700: #XXX : hardcode!
+				store.set(iter, 0, "Searched results are too *MANY*, truncated !!!".decode("utf8"))
+				break
+		return (store, path)
+
+	def update_symbol_list(self, args):
+		entry, tv, win = args[0], args[1], args[2]
+		result = None
+		rest = []
+		prefix = entry.get_text()
+		self.background_search_sym_results_lock.acquire()
+		for r in self.background_search_sym_results:
+			if not r:
+				continue
+			if r[1] == -1 and prefix == r[0]:
+				result = r
+			else:
+				rest.append(r)
+		self.background_search_sym_results = rest
+		self.background_search_sym_results_lock.release()
+		
+		if not result:
+			store = tv.get_model()
+			if not store:
+				return True
+			iter = store.get_iter_first()
+			if not iter:
+				return True
+			value = store.get_value(iter, 0)
+			if value == "Searching, please wait a while":
+				value = "Searching"
+				value = store.set_value(iter, 0, value)
+				return True
+			elif value == "Searching":
+				value = "Searching, please wait a while"
+				value = store.set_value(iter, 0, value)
+				return True
+			return True
+
+		store = result[-1][0]
+		path = result[-1][1]
+
+		if store:
+			tv.set_model(store)
+		for column in tv.get_columns():
+			column.queue_resize()
+		if path:
+			tv.row_activated(path, tv.get_column(0))
+		tv.show_all()
+		return True
+
+	def on_change_symbol_in_list(self, entry, args):
+		tv, win = args[0], args[1]
+		prefix = entry.get_text()
+		if not prefix:
+			return True
+		prefix = prefix.encode("utf8")
+		thr = threading.Thread(target=self.background_search_sym, args=(prefix, -1, False, ""))
+		thr.start()
+		store = gtk.TreeStore(gobject.TYPE_STRING, gobject.TYPE_STRING,
+				gobject.TYPE_STRING, gobject.TYPE_STRING, gobject.TYPE_STRING)
+		iter = store.append(None)
+		store.set(iter, 0, "Searching, please wait a while".decode("utf8"))
+		tv.set_model(store)
+
+	def on_search_window_delete_event(self, win, *data):
+		win.hide_all()
+		return True
+
+	def on_symbol_list(self, *data):
+		sl_win = gtk.Window(gtk.WINDOW_TOPLEVEL)
+		sl_win.set_icon_from_file(INSTALL_PATH + "o.png")
+		sl_win.set_border_width(5)
+		sl_win.connect("key-release-event", self.on_result_window_key_release_event)
+		sl_win.set_title("Symbol list")
+
+		vbox = gtk.VBox()
+
+		hbox = gtk.HBox()
+		hbox.pack_start(gtk.Label("Symbol:"), False, False)
+		entry = gtk.Entry()
+		sym = self.current_symbol()
+		if sym:
+			entry.set_text(sym)
+		hbox.pack_start(entry, True, True, 5)
+		vbox.pack_start(hbox, False, False, 5)
+
+		tv = gtk.TreeView()
+		tv.set_headers_visible(False)
+		tv.set_rules_hint(True)
+		tv.set_grid_lines(True)
+
+		for i in range(4):
+		        renderer = gtk.CellRendererText()
+			renderer.set_property("xalign", 0.0)
+		        column = gtk.TreeViewColumn("", renderer, text = i)
+			column.set_clickable(True)
+			tv.append_column(column)
+
+		tv.connect("row-activated", self.on_one_symbol_in_list_activated, entry)
+		entry.connect("changed", self.on_change_symbol_in_list, (tv, sl_win))
+
+		swin = gtk.ScrolledWindow()
+		swin.set_policy(gtk.POLICY_AUTOMATIC, gtk.POLICY_AUTOMATIC)
+		swin.add(tv)
+		
+		vbox.pack_start(swin, True, True, 5)
+
+		sl_win.add(vbox)
+		sl_win.set_size_request(600, 400)
+		sl_win.show_all()
+		glib.timeout_add(800, self.update_symbol_list, (entry, tv, sl_win))
+
+		if sym:
+			self.on_change_symbol_in_list(entry, (tv, sl_win))
+
+	def on_close_side_bar(self, *data):
+		hpaned = self.xml.get_widget("hpaned")
+		hpaned.set_position(0)
+
+	def on_cbox_side_bar_changed(self, *data):
+		cbox = self.xml.get_widget("cbox_side_bar")
+		nbook_side_bar = self.xml.get_widget("notebook_side_bar")
+		if 0 == cbox.get_active(): # Filesystems sidebar
+			nbook_side_bar.show_all()
+			nbook_side_bar.set_current_page(0)
+			return
+		fn = self.get_current_filename()
+		if not fn:
+			self.show_status("skip outline, no current source file")
+			cbox.set_active(0)
+			return
+
+		swin = nbook_side_bar.get_nth_page(1)
+		tv_outline = swin.get_data("tv_outline")
+		store = gtk.ListStore(gobject.TYPE_STRING, # "kind:name"
+				gobject.TYPE_INT #lineno 
+				)
+
+		results = self.searcher.outline_file(fn)
+		for r in results:
+			lineno = r[2]
+			attrtab = r[3]
+			name = attrtab.get("name")
+			kind = attrtab.get("kind")
+			sig = attrtab.get("signature")
+			iter = store.append(None)
+			try:
+				label = name.decode("utf8")
+			except UnicodeDecodeError:
+				label = name
+			if kind:
+				try:
+					label = kind[0].decode("utf8") + ":" + name
+				except UnicodeDecodeError:
+					label = kind
+			if sig:
+				try:
+					label += sig.decode("utf8")
+				except UnicodeDecodeError:
+					print `sig`
+					label += "(failed to translate into UTF8)"
+			store.set(iter, 0, label.strip(), 1, lineno)
+		tv_outline.set_model(store)
+		tv_outline.show_all()
+		nbook_side_bar.show_all()
+		nbook_side_bar.set_current_page(1)
+		return
+
+	def on_one_search_result_activated(self, tv, path, column):
+		store = tv.get_model()
+		iter = store.get_iter(path)
+		fs_path = store.get_value(iter, 4)
+		lineno = store.get_value(iter, 2)
+		if lineno is not None:
+			self.load_one_source(fs_path, int(lineno))
+		else:
+			#Empty results
+			pass
+
+	def on_one_search_result_expanded(self, tv, iter, path, *data):
+		def iter_kind_symbol(store, iter):
+			kind_sym = store.get_value(iter, 0)
+			kind_sym = kind_sym.encode("utf8")
+			if ":" not in kind_sym:
+				return "", ""
+			kind, sym = kind_sym.split(":")
+			return kind, sym
+		store = tv.get_model()
+		first = store.iter_nth_child(iter, 0)
+		value = store.get_value(first, 0)
+		if value: # this subtree already loaded
+			return
+		store.remove(first) # remove dummy iter now, starting load real subtree.
+
+		parent = store.iter_parent(iter)
+		if parent:
+			parent_kind, parent_sym = iter_kind_symbol(store, parent)
+		else:
+			parent_kind = ""
+			parent_sym = tv.get_data("root-sym")
+
+		this_line = store.get_value(iter, 3)
+		match = re.search("[.](?P<member>[a-zA-Z0-9_]+)[ \t]*=[ \t]*%s[ \t]*[,]?" % parent_sym, this_line)
+
+		if match and match.groups():
+			kind = ""
+			sym = match.groups()[0]
+		else:
+			kind, sym = iter_kind_symbol(store, iter)
+		results = []
+		if sym:
+			results = self.searcher.search_caller(sym)
+		prefix = self.project_current_uri[len("file:"):] + "/"
+		this = iter
+		for r in results:
+			fn = r[0]
+			caller = r[1]
+			lineno = r[2]
+			attrtab = r[3]
+			kind = attrtab.get("kind")
+			if not kind:			
+				if search_type == 0:
+					kind = "unknown"
+				else:
+					kind = ""
+			if fn.startswith(os.path.normpath(prefix)):
+				fn = fn[len(prefix)-1:]	
+			lines = file(prefix+fn).readlines() # XXX!
+			line = lines[lineno-1].strip()
+			kind_caller = kind
+			if caller:
+				kind_caller += ":" + caller
+			iter = store.append(this)
+			store.set(iter, 
+				0, kind_caller.decode("utf8"),
+				1, fn.decode("utf8"), 
+				2, str(lineno).decode("utf8"),
+				3, line.decode("utf8"),
+				4, prefix+fn)
+			if caller:
+				store.append(iter) # the dummy iter
+		if tv.row_expanded(path):
+			tv.collapse_row(path)
+		else:
+			tv.expand_row(path, False)
+
+	def create_result_store(self, search_type, results):
+		"""
+			for def/ref/regex/local-regex/caller search
+		"""
+		prefix = self.project_current_uri[len("file:"):]
+		prefix = os.path.normpath(prefix) + "/"
+		store = gtk.TreeStore(gobject.TYPE_STRING, gobject.TYPE_STRING,
+				gobject.TYPE_STRING, gobject.TYPE_STRING, gobject.TYPE_STRING)
+		if results:
+			for r in results:
+				iter = store.append(None)
+				fn = r[0]
+				caller = r[1]
+				lineno = r[2]
+				attrtab = r[3]
+				kind = attrtab.get("kind")
+				if not kind:
+					if search_type == 0:
+						kind = "unknown"
+					else:
+						kind = ""
+				real_fn = fn
+				if fn.startswith(prefix):
+					fn = fn[len(prefix):]
+				if real_fn[0] != "/":
+					real_fn = prefix + fn
+				lines = file(real_fn).readlines() # XXX!
+				line = lines[lineno-1].strip()
+				kind_caller = ""
+				if caller:
+					kind_caller = caller
+				if kind:
+					kind_caller = kind + ":" + kind_caller
+				store.set(iter, 
+					0, kind_caller.decode("utf8"),
+					1, fn.decode("utf8"), 
+					2, str(lineno).decode("utf8"),
+					3, line.decode("utf8"),
+					4, real_fn)
+				if search_type == 4 and caller:
+					store.append(iter)
+		else:
+			iter = store.append(None)
+			store.set(iter, 0, "Result is empty!".decode("utf8"))
+		return store
+
+	def create_result_window(self, search_type, sym, results=[], store=None):
+		res_win = gtk.Window(gtk.WINDOW_TOPLEVEL)
+		res_win.set_icon_from_file(INSTALL_PATH + "o.png")
+		res_win.set_border_width(5)
+		res_win.connect("key-release-event", self.on_result_window_key_release_event)
+		if search_type == 1:
+			res_win.set_title("References of '%s'" % sym)
+		elif search_type == 0:
+			res_win.set_title("Definitions of '%s'" % sym)
+		elif search_type == 2:
+			res_win.set_title("Regex of '%s'" % sym)
+		elif search_type == 3:
+			res_win.set_title("Local regex of '%s'" % sym)
+		elif search_type == 4:
+			res_win.set_title("What calls '%s'" % sym)
+
+		tv = gtk.TreeView()
+		tv.set_data("root-sym", sym)
+		tv.set_headers_visible(False)
+		tv.set_rules_hint(True)
+		tv.set_grid_lines(True)
+		tv.connect("row-activated", self.on_one_search_result_activated)
+		tv.connect("row-expanded", self.on_one_search_result_expanded)
+
+		for i in range(4):
+		        renderer = gtk.CellRendererText()
+			renderer.set_property("xalign", 0.0)
+		        column = gtk.TreeViewColumn("", renderer, text = i)
+			column.set_clickable(True)
+			column.set_resizable(True)
+			tv.append_column(column)
+
+		if not store:
+			store = self.create_result_store(search_type, results)
+
+		tv.set_model(store)
+	
+		swin = gtk.ScrolledWindow()
+		swin.set_policy(gtk.POLICY_AUTOMATIC, gtk.POLICY_AUTOMATIC)
+		swin.add(tv)
+		res_win.add(swin)
+		res_win.set_size_request(800, 600)
+		for column in tv.get_columns():
+			column.queue_resize()
+		res_win.show_all()
+
+	def on_btn_search_start_clicked(self, *data):
+		search_win = self.xml.get_widget("search_window")
+		search_win.hide_all()
+		cbox = self.xml.get_widget("cbox_search_type")
+		cbentry = self.xml.get_widget("cbentry_symbol")
+		search_type = cbox.get_active()
+		sym = cbentry.get_active_text()
+		if sym:
+			store = cbentry.get_model()
+			iter = store.get_iter_first()
+			while iter:
+				this_sym = store.get_value(iter, 0)
+				if sym == this_sym.encode("utf8"):
+					store.remove(iter)
+					break
+				iter = store.iter_next(iter)
+			iter = store.prepend()
+			store.set(iter, 0, sym.decode("utf8"))
+		gdkwin = self.xml.get_widget("main_window").get_root_window()
+		fn = self.get_current_filename()
+		thr = threading.Thread(target=self.background_search_sym, args=(sym, search_type, False, fn))
+		thr.start()
+		self.show_status("Searching '%s'" % sym)
+
+	def on_btn_search_cancel_clicked(self, *data):
+		search_win = self.xml.get_widget("search_window")
+		search_win.hide_all()
+
+	def close_preview(self):
+		swin = self.xml.get_widget("swin_preview")
+		sv = swin.get_child()
+		if sv:
+			swin.remove(sv)
+		vpaned = self.xml.get_widget("vpaned")
+		maxp = vpaned.get_property("max-position")
+		vpaned.set_position(maxp)
+
+	def on_preview_source_button_press_event(self, sv, ev, *rest):
+		if gtk.gdk._2BUTTON_PRESS != ev.type:
+			return
+		if 1 != ev.button:
+			return
+		fn = sv.get_data("filename")
+		lineno = sv.get_data("lineno")
+		self.load_one_source(fn, lineno+1) # load_one_source() assume that lineno count from 1
+		self.close_preview()
+		self.show_status("")
+		return
+
+	def add_one_submenuitem(self, name, label):
+		menui = self.xml.get_widget(name)
+		subm = menui.get_submenu()
+		if not subm:
+			subm = gtk.Menu()
+			menui.set_submenu(subm)
+		for mi in subm.get_children():
+			this_label = mi.get_data("label")
+			if this_label == label:
+				subm.remove(mi)
+				break
+		newmi = gtk.MenuItem(label, False)
+		newmi.set_data("label", label)
+		subm.prepend(newmi)
+		newmi.show()
+		return newmi
+
+	def on_pos_history_menu_activate(self, menuitem, data):
+		fn, lineno = data[0], data[1]
+		self.load_one_source(fn, lineno)
+
+	def on_sym_history_menu_activate(self, menuitem, data):
+		sym, search_type = data[0], data[1]
+		search_win = self.xml.get_widget("search_window")
+		self.setup_search_window(search_type, sym)
+		search_win.show_all()
+
+	def editing_pos_history_record(self, fn, lineno):
+		name = "menu_editing_pos_history"
+		label = "%s:%d" % (fn, lineno)
+		mi = self.add_one_submenuitem(name, label)
+		if mi:
+			mi.connect("activate", self.on_pos_history_menu_activate, (fn, lineno))
+			self.prev_next_history.record((fn, lineno))
+		self.files_history_record(fn)
+
+	def files_history_record(self, fn):
+		name = "menu_files_history"
+		mi = self.add_one_submenuitem(name, fn)
+		if mi:
+			mi.connect("activate", self.on_pos_history_menu_activate, (fn, 0))
+
+	def def_history_record(self, sym):
+		name = "menu_def_history"
+		mi = self.add_one_submenuitem(name, sym)
+		if mi:
+			mi.connect("activate", self.on_sym_history_menu_activate, (sym, 0))
+
+	def ref_history_record(self, sym):
+		name = "menu_ref_history"
+		mi = self.add_one_submenuitem(name, sym)
+		if mi:
+			mi.connect("activate", self.on_sym_history_menu_activate, (sym, 1))
+
+	def on_prev_editing_pos(self, *data):
+		item = self.prev_next_history.prev()
+		if not item:
+			return
+		fn, lineno = item[0], item[1]
+		self.load_one_source(fn, lineno)
+
+	def on_next_editing_pos(self, *data):
+		item = self.prev_next_history.next()
+		if not item:
+			return
+		fn, lineno = item[0], item[1]
+		self.load_one_source(fn, lineno)
+
+	def on_cbox_filenames_changed(self, cbox, *data):
+		store = cbox.get_model()
+		iter = cbox.get_active_iter()
+		if not iter:	return
+		fn = store.get_value(iter, 0)
+		self.load_one_source(fn.encode("utf8"))
+		self.on_cbox_side_bar_changed() #update outline if needed
+
+	def on_result_window_key_release_event(self, win, evt, *data):
+		if 65307 ==  evt.keyval: # XXX: this is 'Esc'
+			win.hide_all()
+
+	def on_search_window_key_release_event(self, win, evt, *data):
+		if 65307 ==  evt.keyval: # XXX: this is 'Esc'
+			win.hide_all()
+
+	def background_search_sym(self, sym, search_type, is_preview, fn = ""):
+		store = None
+		path = None
+		if search_type == 0:
+			results = self.searcher.search_def(sym)
+			store = self.create_result_store(search_type, results)
+		elif search_type == 1:
+			results = self.searcher.search_ref(sym)
+			store = self.create_result_store(search_type, results)
+		elif search_type == 2:
+			results = self.searcher.search_regex(sym)
+			store = self.create_result_store(search_type, results)
+		elif search_type == 3:
+			results = self.searcher.local_find(sym, fn)
+			store = self.create_result_store(search_type, results)
+		elif search_type == 4:
+			results = self.searcher.search_caller(sym)
+			store = self.create_result_store(search_type, results)
+		elif search_type == -1:
+			results = self.searcher.symbol_list(sym)
+			store, path = self.create_symbol_list_store(sym, results)
+		else:
+			print "oops, search_type =", search_type
+		
+		self.background_search_sym_results_lock.acquire()
+		self.background_search_sym_results.append((sym, search_type, is_preview, results, (store, path)))
+		self.background_search_sym_results_lock.release()
+		#We do not any GUI updates here, so gdk thread lock never breaks us
+
+	def check_search_results(self):
+		"""
+			Timer, in main thread.
+		"""
+		results_list = []
+		rest = []
+		self.background_search_sym_results_lock.acquire()
+		for result in self.background_search_sym_results:
+			if not result:
+				continue
+			if result[1] != -1:
+				results_list.append(result)
+			else:
+				rest.append(result)
+		self.background_search_sym_results = rest
+		self.background_search_sym_results_lock.release()
+		pv_fn = ""
+		pv_lineno = 0
+		for sym, search_type, is_preview, results, store_path in results_list:
+			store = store_path[0]
+			path = store_path[1]
+			if not is_preview:
+				if search_type == 1 and results:
+					self.ref_history_record(sym)
+				if search_type == 0 and results:
+					self.def_history_record(sym)
+				self.create_result_window(search_type, sym, results=results, store=store)
+			elif is_preview and search_type == 0: #symbol must be definiation search.
+				if not results:
+					continue
+				# TODO: need more smarter here!
+				for pv_fn, caller, pv_lineno, attrtab in results:
+					kind = attrtab.get("kind")
+					if kind == "function":
+						break
+			else:
+				print "oops search results:",sym, search_type, is_preview, results
+
+		if pv_fn:
+			prefix = self.project_current_uri[len("file:"):] + "/"
+			self.preview_one_source(prefix+pv_fn, pv_lineno)
+			self.show_status("Preview symbol in " + pv_fn)
+		elif results_list:
+			self.show_status("")
+		return True
+
+	def text_to_utf8(self, text):
+		encoding_list = ("utf8", "gb2312", "gb18030")
+		for encoding in encoding_list:
+			try:
+				return text.decode(encoding)
+			except UnicodeDecodeError:
+				pass
+		return None
+
+	def on_about(self, mi):
+		dlg_about = self.xml.get_widget("dialog_about")
+		dlg_about.show_all()
+		dlg_about.run()
+		dlg_about.hide_all()
+
+def startup(project_dir=None):
+	glib.threads_init()
+	Ohh_UI(project_dir)
+	gtk.main()
+
+if len(sys.argv) > 1:
+	for project_dir in sys.argv[1:]:
+		child = os.fork()
+		if 0 == child:
+			import glib
+			import gobject
+			import gtksourceview2 as gtksv
+			import gio
+			import gtk
+			import gtk.glade
+			import gtk.gdk
+			startup(project_dir)
+else:
+	import glib
+	import gobject
+	import gtksourceview2 as gtksv
+	import gio
+	import gtk
+	import gtk.glade
+	import gtk.gdk
+	startup()
+
