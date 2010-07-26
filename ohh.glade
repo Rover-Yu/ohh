@@ -35,6 +35,13 @@
                       </widget>
                     </child>
                     <child>
+                      <widget class="GtkMenuItem" id="menuitem_recent_projects">
+                        <property name="visible">True</property>
+                        <property name="label" translatable="yes">Recent projects</property>
+                        <property name="use_underline">True</property>
+                      </widget>
+                    </child>
+                    <child>
                       <widget class="GtkImageMenuItem" id="menuitem_save_source">
                         <property name="label" translatable="yes">Save current source</property>
                         <property name="visible">True</property>
@@ -47,12 +54,11 @@
                           </widget>
                         </child>
                       </widget>
-	            </child>
+                    </child>
                     <child>
                       <widget class="GtkMenuItem" id="menuitem_save_all_sources">
-                        <property name="label" translatable="yes">Save all sources</property>
                         <property name="visible">True</property>
-                        <property name="use_stock">False</property>
+                        <property name="label" translatable="yes">Save all sources</property>
                         <signal name="activate" handler="on_save_all_sources"/>
                       </widget>
                     </child>
@@ -142,7 +148,7 @@
                     </child>
                     <child>
                       <widget class="GtkImageMenuItem" id="menuitem_what_call_me">
-                        <property name="label" translatable="yes">Search what call me</property>
+                        <property name="label" translatable="yes">Search what calls me</property>
                         <property name="visible">True</property>
                         <property name="use_stock">False</property>
                         <property name="always_show_image">True</property>
@@ -151,21 +157,6 @@
                           <widget class="GtkImage" id="image10">
                             <property name="visible">True</property>
                             <property name="stock">gtk-go-up</property>
-                          </widget>
-                        </child>
-                      </widget>
-                    </child>
-                    <child>
-                      <widget class="GtkImageMenuItem" id="menuitem_what_i_call">
-                        <property name="label" translatable="yes">Search what I call</property>
-                        <property name="visible">True</property>
-                        <property name="sensitive">False</property>
-                        <property name="use_stock">False</property>
-                        <signal name="activate" handler="on_what_i_call"/>
-                        <child internal-child="image">
-                          <widget class="GtkImage" id="image11">
-                            <property name="visible">True</property>
-                            <property name="stock">gtk-go-down</property>
                           </widget>
                         </child>
                       </widget>
@@ -329,7 +320,7 @@
                   <widget class="GtkToolButton" id="toolbutton_switch">
                     <property name="visible">True</property>
                     <property name="tooltip" translatable="yes">Project switch</property>
-                    <property name="label" translatable="yes">toolbutton</property>
+                    <property name="label" translatable="yes">Project switch</property>
                     <property name="use_underline">True</property>
                     <property name="stock_id">gtk-index</property>
                     <signal name="clicked" handler="on_project_switch"/>
@@ -366,7 +357,7 @@
                   <widget class="GtkToolButton" id="toolbutton_prev">
                     <property name="visible">True</property>
                     <property name="tooltip" translatable="yes">Goto previous position</property>
-                    <property name="label" translatable="yes">toolbutton2</property>
+                    <property name="label" translatable="yes">Go to previous editing position</property>
                     <property name="use_underline">True</property>
                     <property name="stock_id">gtk-go-back</property>
                     <signal name="clicked" handler="on_prev_editing_pos"/>
@@ -380,7 +371,7 @@
                   <widget class="GtkToolButton" id="toolbutton_next">
                     <property name="visible">True</property>
                     <property name="tooltip" translatable="yes">Goto next position</property>
-                    <property name="label" translatable="yes">toolbutton3</property>
+                    <property name="label" translatable="yes">Go to next editing position</property>
                     <property name="use_underline">True</property>
                     <property name="stock_id">gtk-go-forward</property>
                     <signal name="clicked" handler="on_next_editing_pos"/>
@@ -403,7 +394,7 @@
                   <widget class="GtkToolButton" id="toolbutton_search_def">
                     <property name="visible">True</property>
                     <property name="tooltip" translatable="yes">Search a definition</property>
-                    <property name="label" translatable="yes">toolbutton6</property>
+                    <property name="label" translatable="yes">Search definitions</property>
                     <property name="use_underline">True</property>
                     <property name="stock_id">gtk-dnd</property>
                     <signal name="clicked" handler="on_search_def"/>
@@ -417,7 +408,7 @@
                   <widget class="GtkToolButton" id="toolbutton_search_ref">
                     <property name="visible">True</property>
                     <property name="tooltip" translatable="yes">Search a reference</property>
-                    <property name="label" translatable="yes">toolbutton7</property>
+                    <property name="label" translatable="yes">Search references</property>
                     <property name="use_underline">True</property>
                     <property name="stock_id">gtk-dnd-multiple</property>
                     <signal name="clicked" handler="on_search_ref"/>
@@ -431,7 +422,7 @@
                   <widget class="GtkToolButton" id="toolbutton_search_regex">
                     <property name="visible">True</property>
                     <property name="tooltip" translatable="yes">Search a regular expression</property>
-                    <property name="label" translatable="yes">toolbutton8</property>
+                    <property name="label" translatable="yes">Search regular expressions</property>
                     <property name="use_underline">True</property>
                     <property name="stock_id">gtk-find</property>
                     <signal name="clicked" handler="on_search_regex"/>
@@ -445,7 +436,7 @@
                   <widget class="GtkToolButton" id="toolbutton_local_find">
                     <property name="visible">True</property>
                     <property name="tooltip" translatable="yes">Search in current source</property>
-                    <property name="label" translatable="yes">toolbutton1</property>
+                    <property name="label" translatable="yes">Search regular expressions in current sources</property>
                     <property name="use_underline">True</property>
                     <property name="stock_id">gtk-zoom-fit</property>
                     <signal name="clicked" handler="on_local_find"/>
@@ -459,25 +450,10 @@
                   <widget class="GtkToolButton" id="toolbutton_what_call_me">
                     <property name="visible">True</property>
                     <property name="tooltip" translatable="yes">Search what call me</property>
-                    <property name="label" translatable="yes">toolbutton3</property>
+                    <property name="label" translatable="yes">Search what calls me</property>
                     <property name="use_underline">True</property>
                     <property name="stock_id">gtk-go-up</property>
                     <signal name="clicked" handler="on_what_call_me"/>
-                  </widget>
-                  <packing>
-                    <property name="expand">False</property>
-                    <property name="homogeneous">True</property>
-                  </packing>
-                </child>
-                <child>
-                  <widget class="GtkToolButton" id="toolbutton_what_i_call">
-                    <property name="visible">True</property>
-                    <property name="sensitive">False</property>
-                    <property name="tooltip" translatable="yes">Search what I call</property>
-                    <property name="label" translatable="yes">toolbutton6</property>
-                    <property name="use_underline">True</property>
-                    <property name="stock_id">gtk-go-down</property>
-                    <signal name="clicked" handler="on_what_i_call"/>
                   </widget>
                   <packing>
                     <property name="expand">False</property>
@@ -497,7 +473,7 @@
                   <widget class="GtkToolButton" id="toolbutton_symlist">
                     <property name="visible">True</property>
                     <property name="tooltip" translatable="yes">Symbol list</property>
-                    <property name="label" translatable="yes">toolbutton2</property>
+                    <property name="label" translatable="yes">Symbol list</property>
                     <property name="use_underline">True</property>
                     <property name="stock_id">gtk-sort-ascending</property>
                     <signal name="clicked" handler="on_symbol_list"/>
@@ -867,7 +843,7 @@
     <property name="version">R20100730</property>
     <property name="copyright" translatable="yes">Copyright 2010(c) Li Yu</property>
     <property name="comments" translatable="yes">A handy cscope/ctags GUI shell</property>
-    <property name="website_label" translatable="yes">http://ohh.sourceforge.net</property>
+    <property name="website_label" translatable="yes">http://huh.sourceforge.net</property>
     <property name="license" translatable="yes">		    GNU GENERAL PUBLIC LICENSE
 		       Version 2, June 1991
 
