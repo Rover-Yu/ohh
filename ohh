@@ -51,9 +51,8 @@ class Ohh_UI:
 		self.background_search_sym_results = []
 		self.background_search_sym_results_lock = threading.Lock()
 		self.setup_gui()
-		if project_dir:
+		if project_dir and not self.project_switch(project_dir):
 			self.project_current_uri = "file:" + project_dir
-			self.project_switch(project_dir)
 			return
 		else:
 			self.load_last_project()
@@ -147,8 +146,6 @@ class Ohh_UI:
 		w.add_accelerator("activate", accel_group, ord('s'), gtk.gdk.CONTROL_MASK, gtk.ACCEL_VISIBLE)
 		w = self.xml.get_widget("menuitem_what_call_me")
 		w.add_accelerator("activate", accel_group, keyval_up, gtk.gdk.CONTROL_MASK, gtk.ACCEL_VISIBLE)
-		w = self.xml.get_widget("menuitem_what_i_call")
-		w.add_accelerator("activate", accel_group, keyval_down, gtk.gdk.CONTROL_MASK, gtk.ACCEL_VISIBLE)
 		w = self.xml.get_widget("menuitem_symbol_preview_switch")
 		w.add_accelerator("activate", accel_group, ord('p'), gtk.gdk.CONTROL_MASK, gtk.ACCEL_VISIBLE)
 
@@ -172,6 +169,18 @@ class Ohh_UI:
 		if not buffer.get_modified() or self.show_yes_no("%s is modified, close it anyway?" % fn):
 			nbook.remove_page(page_num)
 			self.opened_files.remove(fn)
+			cbox = self.xml.get_widget("cbox_filenames")
+			store = cbox.get_model()
+			if store:
+				iter = store.get_iter_first()
+				while iter and store.get_value(iter, 0) != fn.decode("utf8"):
+					iter = store.iter_next(iter)
+				if iter:
+					store.remove(iter)
+				total = nbook.get_n_pages()
+				if total == 0:
+					cbox = self.xml.get_widget("cbox_side_bar")
+					cbox.set_active(0)
 			return True
 		return False
 
@@ -285,7 +294,7 @@ class Ohh_UI:
 		if not os.path.exists(cwd + "/tags"):
 			return cwd + "/tags does not exist!"
 		self.searcher = searcher.Searcher(cwd)
-		if not self.load_filesystem_side_bar():
+		if not self.load_filesystem_side_bar(cwd):
 			return "failed to list directory [%s] content" % cwd
 		self.show_status("Switch into " + os.path.normpath(cwd))
 		title = self.main_win.get_title()
@@ -321,12 +330,14 @@ class Ohh_UI:
 			if res == gtk.RESPONSE_REJECT:
 				return
 			cwd = uri[len("file:"):]
-			self.project_current_uri = uri
 			err_msg = self.project_switch(cwd)
 			if not err_msg:
+				self.project_current_uri = uri
 				break
 			self.show_error(err_msg)
+		self.load_project()
 
+	def load_project(self):
 		hpaned = self.xml.get_widget("hpaned")
 		nbook = hpaned.get_child2()
 		if nbook:
@@ -345,7 +356,7 @@ class Ohh_UI:
 		cbox.set_active(0)
 		self.close_preview()
 
-	def load_filesystem_side_bar(self):
+	def load_filesystem_side_bar(self, project_dir):
 		tv = self.xml.get_widget("treeview_filesystem")
 		store = gtk.TreeStore(gobject.TYPE_STRING, gobject.TYPE_STRING)
 		old = tv.get_model()
@@ -356,7 +367,7 @@ class Ohh_UI:
 			column.set_clickable(True)
 			column.set_resizable(True)
 			tv.append_column(column)
-		if self.setup_filesystem_store(store, prefix=self.project_current_uri[len("file:"):]):
+		if self.setup_filesystem_store(store, project_dir):
 			tv.set_model(store)
 			return True
 		else:
@@ -488,25 +499,8 @@ class Ohh_UI:
 				return
 			# close current source
 			page_num = nbook.page_num(child)
-			fn = child.get_data("filename")
-			cbox = self.xml.get_widget("cbox_filenames")
-			store = cbox.get_model()
-			if not store:
-				return
-			swin = nbook.get_nth_page(page_num)
-			if not swin:
-				return
 			if not self.on_close_source(page_num = page_num):
 				return
-			iter = store.get_iter_first()
-			while iter and store.get_value(iter, 0) != fn.decode("utf8"):
-				iter = store.iter_next(iter)
-			if iter:
-				store.remove(iter)
-			total = nbook.get_n_pages()
-			if total == 0:
-				cbox = self.xml.get_widget("cbox_side_bar")
-				cbox.set_active(0)
 
 		def on_page_removed(nbook, page, page_num, self):
 			# after remove a source page
@@ -623,7 +617,6 @@ class Ohh_UI:
 		if cur_fn:
 			self.files_history_record(cur_fn)
 			if cur_lineno:
-				print cur_fn, cur_lineno
 				self.prev_next_history.record((cur_fn, cur_lineno))
 		fn = os.path.normpath(fn)
 		if fn in self.opened_files: # this source is opened, so activate it here
@@ -806,6 +799,14 @@ class Ohh_UI:
 		else:
 			self.load_one_source(fs_path)
 
+	def on_recent_project(self, mi, cwd):
+		err_msg = self.project_switch(cwd)
+		if err_msg:
+			self.show_status(err_msg)
+			return
+		self.project_current_uri = "file://" + cwd
+		self.load_project()
+
 	def load_last_project(self):
 		try:
 			rc = open("%s/.ohh.rc" % os.getenv("HOME"))
@@ -822,15 +823,32 @@ class Ohh_UI:
 			return
 		project_uri = ""
 		project_time = 0
+
+		if prev_rc:
+			recent = self.xml.get_widget("menuitem_recent_projects")
+			project_list = gtk.Menu()
+			recent.set_submenu(project_list)
 		for proj in prev_rc:
 			if prev_rc[proj]["time"] > project_time:
 				project_uri = proj
 				project_time = prev_rc[proj]["time"]
-		self.project_current_uri = project_uri
+			proj = proj[len("file:"):]
+			proj = os.path.normpath(proj)
+			mi = gtk.MenuItem(proj, False)
+			mi.connect("activate", self.on_recent_project, proj)
+			mi.show()
+			project_list.append(mi)
+
+		if not project_uri:
+			return
 		if self.project_switch(project_uri[len("file:"):]):
 			return
+		self.project_current_uri = project_uri
 		for fn in prev_rc[project_uri]["opened"]:
 			self.load_one_source(fn)
+		cur_fn = prev_rc[project_uri]["current_filename"]
+		cur_lineno = prev_rc[project_uri]["current_lineno"]
+		self.load_one_source(cur_fn, cur_lineno)
 		mi = self.xml.get_widget("menuitem_symbol_preview_switch")
 		mi.set_active(prev_rc[project_uri]["preview"])
 		cbox = self.xml.get_widget("cbox_side_bar")
@@ -838,6 +856,8 @@ class Ohh_UI:
 		self.prev_next_history.clear()
 
 	def save_current_project(self):
+		if not self.project_current_uri:
+			return
 		saveinfo = { }
 		mi = self.xml.get_widget("menuitem_symbol_preview_switch")
 		saveinfo[ "preview" ] = mi.get_active()
@@ -845,6 +865,8 @@ class Ohh_UI:
 		saveinfo[ "time" ] = int(time.time())
 		cbox = self.xml.get_widget("cbox_side_bar")
 		saveinfo[ "outline" ] = cbox.get_active()
+		saveinfo [ "current_filename" ] = self.get_current_filename()
+		saveinfo [ "current_lineno" ] = self.get_current_lineno()
 		try:
 			rc = open("%s/.ohh.rc" % os.getenv("HOME"))
 			prev_rc = rc.read()
