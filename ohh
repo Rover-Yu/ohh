@@ -31,7 +31,7 @@ import re
 import fcntl
 import time
 
-INSTALL_PATH = "/home/li/src/python/ohh" + "/"
+INSTALL_PATH = "/home/sailor/src/python/ohh" + "/"
 
 class Ohh_UI:
 	def __init__(self, project_dir = None):
@@ -257,12 +257,12 @@ class Ohh_UI:
 		fn = self.get_current_filename()
 		self.load_one_source(fn, lineno)
 
-	def get_current_filename(self):
+	def get_current_filename(self, n = -1):
 		hpaned = self.xml.get_widget("hpaned")
 		nbook = hpaned.get_child2()
 		if not nbook:	return ""
-		n = nbook.get_current_page()
-		if n < 0: return ""
+		if n == -1:
+			n = nbook.get_current_page()
 		swin = nbook.get_nth_page(n)
 		if not swin:	return ""
 		fn = swin.get_data("filename")
@@ -845,10 +845,15 @@ class Ohh_UI:
 			return
 		self.project_current_uri = project_uri
 		for fn in prev_rc[project_uri]["opened"]:
-			self.load_one_source(fn)
+			lineno = prev_rc[project_uri]["opened"][fn]
+			lineno = int(lineno)
+			if lineno < 0:
+				lineno = 0
+			self.load_one_source(fn, lineno)
 		cur_fn = prev_rc[project_uri]["current_filename"]
 		cur_lineno = prev_rc[project_uri]["current_lineno"]
-		self.load_one_source(cur_fn, cur_lineno)
+		if cur_fn:
+			self.load_one_source(cur_fn, int(cur_lineno))
 		mi = self.xml.get_widget("menuitem_symbol_preview_switch")
 		mi.set_active(prev_rc[project_uri]["preview"])
 		cbox = self.xml.get_widget("cbox_side_bar")
@@ -861,7 +866,14 @@ class Ohh_UI:
 		saveinfo = { }
 		mi = self.xml.get_widget("menuitem_symbol_preview_switch")
 		saveinfo[ "preview" ] = mi.get_active()
-		saveinfo[ "opened" ] = self.opened_files
+		i = 0
+		saveinfo[ "opened" ] = {}
+		while True:
+			fn = self.get_current_filename(i)
+			if not fn:
+				break
+			saveinfo[ "opened" ][fn] = self.get_current_lineno(i)
+			i += 1
 		saveinfo[ "time" ] = int(time.time())
 		cbox = self.xml.get_widget("cbox_side_bar")
 		saveinfo[ "outline" ] = cbox.get_active()
