@@ -271,7 +271,7 @@ class Ctags(Indexer):
 					attrtab[k] = v
 				except ValueError:
 					print "abnormal attrtab",f
-					print l
+					print "abnormal lines:", lines
 					continue
 			attrtab["name"] = fields[0]
 			try:
