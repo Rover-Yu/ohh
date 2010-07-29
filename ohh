@@ -472,6 +472,9 @@ class Ohh_UI:
 
 	def scroll_in_sourceview(self, sv, lineno, delta = 5):
 		buffer = sv.get_buffer()
+		start = buffer.get_start_iter()
+		mark = buffer.create_mark("start", start)
+		sv.scroll_mark_onscreen(mark)
 		total_lineno = buffer.get_line_count()
 		iter = buffer.get_iter_at_line(lineno)
 		buffer.place_cursor(iter)
