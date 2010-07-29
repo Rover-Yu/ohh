@@ -709,7 +709,29 @@ class Ohh_UI:
 		menu.popup(None, None, None, 3, evt_time)
 		menu.show_all()
 
+	def switch_sourceview(self, disp):
+		hpaned = self.xml.get_widget("hpaned")
+		nbook = hpaned.get_child2()
+		if not nbook:
+			return
+		c = nbook.get_current_page()
+		n = nbook.get_n_pages()
+		c += disp
+		if c < 0:
+			c = 0
+		if c >= n:
+			c = n - 1
+		nbook.set_current_page(c)
+
 	def on_move_in_main_sv(self, sv, evt):
+		if evt.type == gtk.gdk.KEY_PRESS:
+			if evt.state & gtk.gdk.CONTROL_MASK:
+				if evt.keyval == 65365: # PageUp
+					self.switch_sourceview(-1)
+					return True
+				if evt.keyval == 65366: # PageDown
+					self.switch_sourceview(+1)
+					return True
 		popup = False
 		if evt.type == gtk.gdk.BUTTON_PRESS and evt.button == 3:
 			self.popup_menu(sv, evt.get_time())
