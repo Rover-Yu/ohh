@@ -44,7 +44,8 @@ class Ohh_UI:
 		self.xml = xml
 		self.searcher = None
 		self.prev_next_history = searcher.History()
-		self.project_current_uri = None
+		self.current_project_uri = None
+		self.current_filename = ""
 		self.opened_files = []
 		self.prev_current_symbol = None
 		glib.timeout_add(1000, self.check_search_results)
@@ -54,12 +55,13 @@ class Ohh_UI:
 		if project_dir:
 			project_dir = os.path.abspath(project_dir)
 			project_dir = os.path.normpath(project_dir)
-		if project_dir and not self.project_switch(project_dir):
-			self.scan_recent_project()
-			self.project_current_uri = "file:" + project_dir
+		last_project_uri, self.ohh_rc = self.scan_recent_project()
+		self.update_recent_project_menu()
+		if project_dir and not self.switch_project(project_dir):
+			self.current_project_uri = "file:" + project_dir
 			return
-		else:
-			self.load_last_project()
+		elif last_project_uri:
+			self.load_project_rc(last_project_uri)
 			return
 
 	def setup_gui(self):
@@ -175,16 +177,15 @@ class Ohh_UI:
 			self.opened_files.remove(fn)
 			cbox = self.xml.get_widget("cbox_filenames")
 			store = cbox.get_model()
-			if store:
-				iter = store.get_iter_first()
-				while iter and store.get_value(iter, 0) != fn.decode("utf8"):
-					iter = store.iter_next(iter)
-				if iter:
-					store.remove(iter)
-				total = nbook.get_n_pages()
-				if total == 0:
-					cbox = self.xml.get_widget("cbox_side_bar")
-					cbox.set_active(0)
+			iter = store.get_iter_first()
+			while iter and store.get_value(iter, 0) != fn.decode("utf8"):
+				iter = store.iter_next(iter)
+			if iter:
+				store.remove(iter)
+			total = nbook.get_n_pages()
+			if total == 0:
+				cbox = self.xml.get_widget("cbox_side_bar")
+				cbox.set_active(0)
 			return True
 		return False
 
@@ -262,11 +263,11 @@ class Ohh_UI:
 		self.load_one_source(fn, lineno)
 
 	def get_current_filename(self, n = -1):
+		if n == -1:
+			return self.current_filename
 		hpaned = self.xml.get_widget("hpaned")
 		nbook = hpaned.get_child2()
 		if not nbook:	return ""
-		if n == -1:
-			n = nbook.get_current_page()
 		swin = nbook.get_nth_page(n)
 		if not swin:	return ""
 		fn = swin.get_data("filename")
@@ -282,7 +283,9 @@ class Ohh_UI:
 		if not swin:	return ""
 
 		sv = swin.get_data("editor")
+		return self.get_sourceview_lineno(sv)
 
+	def get_sourceview_lineno(self, sv):
 		buffer = sv.get_buffer()
 		mark = buffer.get_insert()
 		iter = buffer.get_iter_at_mark(mark)
@@ -290,7 +293,7 @@ class Ohh_UI:
 		text = buffer.get_text(start, iter)
 		return text.count("\n") + 1
 
-	def project_switch(self, cwd):
+	def switch_project(self, cwd):
 		cwd = os.path.abspath(cwd)
 		## XXX: below checks should be do in searcher.Searcher(cwd)
 		if not os.path.exists(cwd + "/cscope.out"):
@@ -326,8 +329,8 @@ class Ohh_UI:
 					buttons= (gtk.STOCK_CANCEL, gtk.RESPONSE_REJECT, \
 							gtk.STOCK_OK, gtk.RESPONSE_ACCEPT))
 			chooser.set_local_only(True)
-			if self.project_current_uri:
-				chooser.set_current_folder_uri(self.project_current_uri)
+			if self.current_project_uri:
+				chooser.set_current_folder_uri(self.current_project_uri)
 			res = chooser.run()
 			uri = chooser.get_uri()
 			chooser.destroy()
@@ -336,14 +339,23 @@ class Ohh_UI:
 			project_dir = uri[len("file:"):]
 			project_dir = os.path.abspath(project_dir)
 			project_dir = os.path.normpath(project_dir)
-			err_msg = self.project_switch(project_dir)
+			err_msg = self.switch_project(project_dir)
 			if not err_msg:
-				self.project_current_uri = "file:"+project_dir
+				self.close_project()
+				self.current_project_uri = "file:"+project_dir
 				break
 			self.show_error(err_msg)
 		self.load_project()
 
 	def load_project(self):
+		if self.current_project_uri in self.ohh_rc:
+			self.load_project_rc(self.current_project_uri)
+
+	def close_project(self):
+		if not self.current_project_uri:
+			return
+		self.save_current_project()
+		self.update_recent_project_menu()
 		hpaned = self.xml.get_widget("hpaned")
 		nbook = hpaned.get_child2()
 		if nbook:
@@ -449,12 +461,15 @@ class Ohh_UI:
 		return buffer
 
 	def preview_one_source(self, fn, lineno):
+		cur_fn = self.get_current_filename()
+		cur_lineno = self.get_current_lineno()
+		if cur_fn == fn and cur_lineno == lineno:
+			return
 		buffer = self.read_one_source(fn)
 		if lineno > 0:
 			lineno -= 1 # rebase from 0
 		sv = self.create_sourceview(buffer, lineno, True)
 		sv.set_data("filename", fn)
-		sv.set_data("lineno", lineno)
 		sv.connect("button-press-event", self.on_preview_source_button_press_event)
 		self.add_preview_sourceview(sv, lineno)
 		self.scroll_in_sourceview(sv, lineno)
@@ -515,11 +530,7 @@ class Ohh_UI:
 			# after remove a source page
 			# according to possible new current page, update "cbox_filenames"
 			cbox = self.xml.get_widget("cbox_filenames")
-			if not cbox:	
-				return
 			store = cbox.get_model()
-			if not store:	
-				return
 			n = nbook.get_current_page()
 			swin = nbook.get_nth_page(n)
 			if not swin:
@@ -535,16 +546,14 @@ class Ohh_UI:
 				cbox.set_active_iter(iter)
 
 		def on_page_switch(nbook, page, page_num, self):
-			cbox = self.xml.get_widget("cbox_filenames")
-			store = cbox.get_model()
-			if not store:
-				return
 			swin = nbook.get_nth_page(page_num)
 			if not swin:
 				return
 			fn = swin.get_data("filename")
 			if not fn:
 				return
+			cbox = self.xml.get_widget("cbox_filenames")
+			store = cbox.get_model()
 			iter = store.get_iter_first()
 			while iter and store.get_value(iter, 0) != fn.decode("utf8"):
 				iter = store.iter_next(iter)
@@ -631,6 +640,7 @@ class Ohh_UI:
 			if cur_lineno:
 				self.prev_next_history.record((cur_fn, cur_lineno))
 		fn = os.path.normpath(fn)
+		self.current_filename = fn
 		if fn in self.opened_files: # this source is opened, so activate it here
 			self.reload_opened_source(fn, lineno)
 		else:
@@ -837,13 +847,30 @@ class Ohh_UI:
 			self.load_one_source(fs_path)
 
 	def on_recent_project(self, mi, cwd):
-		err_msg = self.project_switch(cwd)
+		err_msg = self.switch_project(cwd)
 		if err_msg:
 			self.show_status(err_msg)
 			return
-		self.project_current_uri = "file:" + cwd
+		self.close_project()
+		self.current_project_uri = "file:" + cwd
 		self.load_project()
 
+	def update_recent_project_menu(self):
+		recent = self.xml.get_widget("menuitem_recent_projects")
+		project_list = recent.get_submenu()
+		if project_list:
+			recent.remove_submenu()
+		project_list = gtk.Menu()
+		recent.set_submenu(project_list)
+		for proj in self.ohh_rc:
+			proj = proj[len("file:"):]
+			proj = os.path.abspath(proj)
+			proj = os.path.normpath(proj)
+			mi = gtk.MenuItem(proj, False)
+			mi.connect("activate", self.on_recent_project, proj)
+			mi.show()
+			project_list.prepend(mi)
+	
 	def scan_recent_project(self):
 		try:
 			rc = open("%s/.ohh.rc" % os.getenv("HOME"))
@@ -857,37 +884,22 @@ class Ohh_UI:
 		except IOError:
 			prev_rc = {}
 		if not prev_rc:
-			return
+			return "", {}
 		project_uri = ""
 		project_time = 0
-
-		if prev_rc:
-			recent = self.xml.get_widget("menuitem_recent_projects")
-			project_list = gtk.Menu()
-			recent.set_submenu(project_list)
 		for proj in prev_rc:
 			if prev_rc[proj]["time"] > project_time:
 				project_uri = proj
 				project_time = prev_rc[proj]["time"]
-			proj = proj[len("file:"):]
-			proj = os.path.normpath(proj)
-			mi = gtk.MenuItem(proj, False)
-			mi.connect("activate", self.on_recent_project, proj)
-			mi.show()
-			project_list.append(mi)
-		if project_uri:
-			return project_uri, prev_rc
-		return
+		return project_uri, prev_rc
 
-	def load_last_project(self):
-		last_project = self.scan_recent_project()		
-		if not last_project:
+	def load_project_rc(self, project_uri):
+		prev_rc = self.ohh_rc
+		if not project_uri or not prev_rc:
 			return
-		project_uri = last_project[0]
-		prev_rc = last_project[1]
-		if self.project_switch(project_uri[len("file:"):]):
+		if self.switch_project(project_uri[len("file:"):]):
 			return
-		self.project_current_uri = project_uri
+		self.current_project_uri = project_uri
 		for fn in prev_rc[project_uri]["opened"]:
 			lineno = prev_rc[project_uri]["opened"][fn]
 			lineno = int(lineno)
@@ -905,7 +917,7 @@ class Ohh_UI:
 		self.prev_next_history.clear()
 
 	def save_current_project(self):
-		if not self.project_current_uri:
+		if not self.current_project_uri:
 			return
 		saveinfo = { }
 		mi = self.xml.get_widget("menuitem_symbol_preview_switch")
@@ -934,7 +946,8 @@ class Ohh_UI:
 				prev_rc = {}
 		except IOError:
 			prev_rc = {}
-		prev_rc[self.project_current_uri] = saveinfo
+		prev_rc[self.current_project_uri] = saveinfo
+		self.ohh_rc[self.current_project_uri] = saveinfo
 		rc = open("%s/.ohh.rc" % os.getenv("HOME"), "w")
 		rc.write("{\n\n")
 		for uri in prev_rc:
@@ -1044,6 +1057,11 @@ class Ohh_UI:
 			mi = self.xml.get_widget(name)
 			mi.set_submenu(None)
 		self.prev_next_history.clear()
+		self.ohh_rc = {}
+		try:
+			os.unlink("%s/.ohh.rc" % os.getenv("HOME"))
+		finally:
+			pass
 
 	def on_one_symbol_in_list_activated(self, tv, path, column, entry):
 		store = tv.get_model()
@@ -1069,7 +1087,7 @@ class Ohh_UI:
 		results = self.searcher.search_def(sym)
 		if not results:
 			return
-		prefix = self.project_current_uri[len("file:"):] + "/"
+		prefix = self.current_project_uri[len("file:"):] + "/"
 		for r in results:
 			iter = store.append(parent)
 			fn = r[0]
@@ -1221,19 +1239,13 @@ class Ohh_UI:
 		hpaned = self.xml.get_widget("hpaned")
 		hpaned.set_position(0)
 
-	def on_cbox_side_bar_changed(self, *data):
-		cbox = self.xml.get_widget("cbox_side_bar")
+	def update_outline(self):
 		nbook_side_bar = self.xml.get_widget("notebook_side_bar")
-		if 0 == cbox.get_active(): # Filesystems sidebar
-			nbook_side_bar.show_all()
-			nbook_side_bar.set_current_page(0)
-			return
 		fn = self.get_current_filename()
 		if not fn:
 			self.show_status("skip outline, no current source file")
 			cbox.set_active(0)
 			return
-
 		swin = nbook_side_bar.get_nth_page(1)
 		tv_outline = swin.get_data("tv_outline")
 		store = gtk.ListStore(gobject.TYPE_STRING, # "kind:name"
@@ -1265,9 +1277,18 @@ class Ohh_UI:
 			store.set(iter, 0, label.strip(), 1, lineno)
 		tv_outline.set_model(store)
 		tv_outline.show_all()
-		nbook_side_bar.show_all()
 		nbook_side_bar.set_current_page(1)
-		return
+		nbook_side_bar.show_all()
+
+	def on_cbox_side_bar_changed(self, *data):
+		cbox = self.xml.get_widget("cbox_side_bar")
+		if 0 == cbox.get_active():
+			# turn on filesystems sidebar
+			nbook_side_bar = self.xml.get_widget("notebook_side_bar")
+			nbook_side_bar.show_all()
+			nbook_side_bar.set_current_page(0)
+		else:
+			self.update_outline()
 
 	def on_one_search_result_activated(self, tv, path, column):
 		store = tv.get_model()
@@ -1313,7 +1334,7 @@ class Ohh_UI:
 		results = []
 		if sym:
 			results = self.searcher.search_caller(sym)
-		prefix = self.project_current_uri[len("file:"):] + "/"
+		prefix = self.current_project_uri[len("file:"):] + "/"
 		this = iter
 		for r in results:
 			fn = r[0]
@@ -1351,7 +1372,7 @@ class Ohh_UI:
 		"""
 			for def/ref/regex/local-regex/caller search
 		"""
-		prefix = self.project_current_uri[len("file:"):]
+		prefix = self.current_project_uri[len("file:"):]
 		prefix = os.path.normpath(prefix) + "/"
 		store = gtk.TreeStore(gobject.TYPE_STRING, gobject.TYPE_STRING,
 				gobject.TYPE_STRING, gobject.TYPE_STRING, gobject.TYPE_STRING)
@@ -1483,8 +1504,8 @@ class Ohh_UI:
 			if not sv:
 				return
 		fn = sv.get_data("filename")
-		lineno = sv.get_data("lineno")
-		self.load_one_source(fn, lineno+1) # load_one_source() assume that lineno count from 1
+		lineno = self.get_sourceview_lineno(sv)
+		self.load_one_source(fn, lineno) # load_one_source() assume that lineno count from 1
 		self.close_preview()
 		self.show_status("")
 
@@ -1640,7 +1661,7 @@ class Ohh_UI:
 				print "oops search results:",sym, search_type, is_preview, results
 
 		if pv_fn:
-			prefix = self.project_current_uri[len("file:"):] + "/"
+			prefix = self.current_project_uri[len("file:"):] + "/"
 			self.preview_one_source(prefix+pv_fn, pv_lineno)
 			self.show_status("Preview symbol in " + pv_fn)
 		elif results_list:
