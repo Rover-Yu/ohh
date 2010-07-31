@@ -31,6 +31,8 @@ import re
 import fcntl
 import time
 
+C_KEYWORDS = indexer.C_KEYWORDS
+
 INSTALL_PATH = "/home/sailor/src/python/ohh" + "/"
 
 class Ohh_UI:
@@ -276,11 +278,11 @@ class Ohh_UI:
 	def get_current_lineno(self, n = -1):
 		hpaned = self.xml.get_widget("hpaned")
 		nbook = hpaned.get_child2()
-		if not nbook:	return ""
+		if not nbook:	return 0
 		if n == -1:
 			n = nbook.get_current_page()
 		swin = nbook.get_nth_page(n)
-		if not swin:	return ""
+		if not swin:	return 0
 
 		sv = swin.get_data("editor")
 		return self.get_sourceview_lineno(sv)
@@ -473,6 +475,7 @@ class Ohh_UI:
 		sv.connect("button-press-event", self.on_preview_source_button_press_event)
 		self.add_preview_sourceview(sv, lineno)
 		self.scroll_in_sourceview(sv, lineno)
+		self.show_status("Previewing in " + fn)
 
 	def add_preview_sourceview(self, sv, lineno):
 		swin = self.xml.get_widget("swin_preview")
@@ -529,6 +532,7 @@ class Ohh_UI:
 		def on_page_removed(nbook, page, page_num, self):
 			# after remove a source page
 			# according to possible new current page, update "cbox_filenames"
+			self.current_filename = ""
 			cbox = self.xml.get_widget("cbox_filenames")
 			store = cbox.get_model()
 			n = nbook.get_current_page()
@@ -550,6 +554,7 @@ class Ohh_UI:
 			if not swin:
 				return
 			fn = swin.get_data("filename")
+			self.current_filename = fn
 			if not fn:
 				return
 			cbox = self.xml.get_widget("cbox_filenames")
@@ -657,11 +662,12 @@ class Ohh_UI:
 		if not mi.get_active():
 			return
 		sym = self.current_symbol()
+		if sym in C_KEYWORDS:
+			return
 		if sym and sym != self.prev_current_symbol:
 			self.prev_current_symbol = sym
 			thr = threading.Thread(target=self.background_search_sym, args=(sym, 0, True))
 			thr.start()
-			self.show_status("Previewing '%s'" % sym)
 
 	def popup_menu(self, sv, evt_time):
 		def create_popup_menuitem(menu, stock, label, callback, data=None):
@@ -947,7 +953,7 @@ class Ohh_UI:
 		except IOError:
 			prev_rc = {}
 		prev_rc[self.current_project_uri] = saveinfo
-		self.ohh_rc[self.current_project_uri] = saveinfo
+		self.ohh_rc = prev_rc
 		rc = open("%s/.ohh.rc" % os.getenv("HOME"), "w")
 		rc.write("{\n\n")
 		for uri in prev_rc:
@@ -1241,8 +1247,9 @@ class Ohh_UI:
 		fn = self.get_current_filename()
 		if not fn:
 			self.show_status("skip outline, no current source file")
+			cbox = self.xml.get_widget("cbox_side_bar")
 			cbox.set_active(0)
-			return
+			return True
 		swin = nbook_side_bar.get_nth_page(1)
 		tv_outline = swin.get_data("tv_outline")
 		store = gtk.ListStore(gobject.TYPE_STRING, # "kind:name"
@@ -1660,7 +1667,6 @@ class Ohh_UI:
 		if pv_fn:
 			prefix = self.current_project_uri[len("file:"):] + "/"
 			self.preview_one_source(prefix+pv_fn, pv_lineno)
-			self.show_status("Preview symbol in " + pv_fn)
 		elif results_list:
 			self.show_status("")
 		return True
