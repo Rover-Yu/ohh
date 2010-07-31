@@ -51,7 +51,11 @@ class Ohh_UI:
 		self.background_search_sym_results = []
 		self.background_search_sym_results_lock = threading.Lock()
 		self.setup_gui()
+		if project_dir:
+			project_dir = os.path.abspath(project_dir)
+			project_dir = os.path.normpath(project_dir)
 		if project_dir and not self.project_switch(project_dir):
+			self.scan_recent_project()
 			self.project_current_uri = "file:" + project_dir
 			return
 		else:
@@ -329,10 +333,12 @@ class Ohh_UI:
 			chooser.destroy()
 			if res == gtk.RESPONSE_REJECT:
 				return
-			cwd = uri[len("file:"):]
-			err_msg = self.project_switch(cwd)
+			project_dir = uri[len("file:"):]
+			project_dir = os.path.abspath(project_dir)
+			project_dir = os.path.normpath(project_dir)
+			err_msg = self.project_switch(project_dir)
 			if not err_msg:
-				self.project_current_uri = uri
+				self.project_current_uri = "file:"+project_dir
 				break
 			self.show_error(err_msg)
 		self.load_project()
@@ -531,11 +537,14 @@ class Ohh_UI:
 		def on_page_switch(nbook, page, page_num, self):
 			cbox = self.xml.get_widget("cbox_filenames")
 			store = cbox.get_model()
-			if not store:	return
+			if not store:
+				return
 			swin = nbook.get_nth_page(page_num)
-			if not swin:	return
+			if not swin:
+				return
 			fn = swin.get_data("filename")
-			if not fn:	return
+			if not fn:
+				return
 			iter = store.get_iter_first()
 			while iter and store.get_value(iter, 0) != fn.decode("utf8"):
 				iter = store.iter_next(iter)
@@ -832,10 +841,10 @@ class Ohh_UI:
 		if err_msg:
 			self.show_status(err_msg)
 			return
-		self.project_current_uri = "file://" + cwd
+		self.project_current_uri = "file:" + cwd
 		self.load_project()
 
-	def load_last_project(self):
+	def scan_recent_project(self):
 		try:
 			rc = open("%s/.ohh.rc" % os.getenv("HOME"))
 			prev_rc = rc.read()
@@ -866,9 +875,16 @@ class Ohh_UI:
 			mi.connect("activate", self.on_recent_project, proj)
 			mi.show()
 			project_list.append(mi)
+		if project_uri:
+			return project_uri, prev_rc
+		return
 
-		if not project_uri:
+	def load_last_project(self):
+		last_project = self.scan_recent_project()		
+		if not last_project:
 			return
+		project_uri = last_project[0]
+		prev_rc = last_project[1]
 		if self.project_switch(project_uri[len("file:"):]):
 			return
 		self.project_current_uri = project_uri
@@ -920,7 +936,11 @@ class Ohh_UI:
 			prev_rc = {}
 		prev_rc[self.project_current_uri] = saveinfo
 		rc = open("%s/.ohh.rc" % os.getenv("HOME"), "w")
-		rc.write(str(prev_rc))
+		rc.write("{\n\n")
+		for uri in prev_rc:
+			rc.write('"%s":\n' % uri)
+			rc.write(str(prev_rc[uri]) + ",\n\n")
+		rc.write("}\n")
 		rc.close()
 
 	def on_quit(self, *data):
@@ -1219,7 +1239,6 @@ class Ohh_UI:
 		store = gtk.ListStore(gobject.TYPE_STRING, # "kind:name"
 				gobject.TYPE_INT #lineno 
 				)
-
 		results = self.searcher.outline_file(fn)
 		for r in results:
 			lineno = r[2]
