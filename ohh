@@ -732,6 +732,9 @@ class Ohh_UI:
 				if evt.keyval == 65366: # PageDown
 					self.switch_sourceview(+1)
 					return True
+				if evt.keyval == ord("]"):
+					self.load_preview_source()
+					return True
 		popup = False
 		if evt.type == gtk.gdk.BUTTON_PRESS and evt.button == 3:
 			self.popup_menu(sv, evt.get_time())
@@ -1454,17 +1457,24 @@ class Ohh_UI:
 		maxp = vpaned.get_property("max-position")
 		vpaned.set_position(maxp)
 
-	def on_preview_source_button_press_event(self, sv, ev, *rest):
-		if gtk.gdk._2BUTTON_PRESS != ev.type:
-			return
-		if 1 != ev.button:
-			return
+	def load_preview_source(self, sv = None):
+		if not sv:
+			swin = self.xml.get_widget("swin_preview")
+			sv = swin.get_child()
+			if not sv:
+				return
 		fn = sv.get_data("filename")
 		lineno = sv.get_data("lineno")
 		self.load_one_source(fn, lineno+1) # load_one_source() assume that lineno count from 1
 		self.close_preview()
 		self.show_status("")
-		return
+
+	def on_preview_source_button_press_event(self, sv, ev, *rest):
+		if gtk.gdk._2BUTTON_PRESS != ev.type:
+			return
+		if 1 != ev.button:
+			return
+		self.load_preview_source(sv)
 
 	def add_one_submenuitem(self, name, label):
 		menui = self.xml.get_widget(name)
