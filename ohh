@@ -1037,9 +1037,6 @@ class Ohh_UI:
 		self.setup_search_window(4, sym)
 		search_win.show_all()
 
-	def on_what_i_call(self, *data):
-		print "what i call"
-
 	def on_local_find(self, *data):
 		cur_fn = self.get_current_filename()
 		if not cur_fn:
