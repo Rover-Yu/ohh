@@ -78,7 +78,6 @@ class Indexer(object):
 
 	def runCommand(self, args): # such names means private methods
 		import subprocess as sp
-		import shlex
 		if self.cwd:
 			cwd = os.getcwd()
 			os.chdir(self.cwd)
@@ -91,7 +90,7 @@ class Indexer(object):
 			if not stdout:
 				raise IOError, "failed to run '%s':%s" % (args, stderr)
 			else:
-				print "cscope said below words at stderr:"
+				print "%s said below words at stderr:" % args[0]
 				print stderr
 		return stdout
 
@@ -270,8 +269,13 @@ class Ctags(Indexer):
 					k, v = f.split(":", 1)
 					attrtab[k] = v
 				except ValueError:
-					print "abnormal attrtab",f
-					print "abnormal lines:", lines
+					print "abnormal attrtab", f
+					print "abnormal lines:"
+					for t in lines:
+						print `t`
+					print 'abnormal line', `l`
+					import traceback
+					traceback.print_stack()
 					continue
 			attrtab["name"] = fields[0]
 			try:
