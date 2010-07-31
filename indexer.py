@@ -23,6 +23,31 @@
 
 import os
 
+C_KEYWORDS = (
+	"if",
+	"else",
+	"for",
+	"while",
+	"return",
+
+	"extern",
+	"static",
+	"volatile",
+
+	"unsigned",
+	"signed",
+
+	"char",
+	"short",
+	"int",
+	"long",
+	"float",
+	"double",
+	"void",
+
+	"struct",
+)
+
 class NotImplementedYet(BaseException):
 	pass
 
