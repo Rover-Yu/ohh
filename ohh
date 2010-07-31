@@ -456,6 +456,9 @@ class Ohh_UI:
 			txt = open(fn).read()
 		except IOError:
 		        return False
+		if not txt:
+			print fn, txt
+			return False
 		buffer.set_text(self.text_to_utf8(txt))
 		buffer.set_data('filename', fn)
 		buffer.end_not_undoable_action()
