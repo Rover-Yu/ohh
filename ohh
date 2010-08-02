@@ -309,7 +309,7 @@ class Ohh_UI:
 		title = self.main_win.get_title()
 		if "-" in title:
 			title = title.split("-")[0] + " "
-		self.main_win.set_title(title.strip() + " - " + os.path.normpath(cwd))
+		self.main_win.set_title(title.strip() + " - " + os.path.normname(cwd))
 
 	def show_yes_no(self, err_msg):
 		dlg = gtk.MessageDialog(self.main_win,  gtk.DIALOG_MODAL|gtk.DIALOG_DESTROY_WITH_PARENT, \
@@ -375,6 +375,7 @@ class Ohh_UI:
 		cbox = self.xml.get_widget("cbox_side_bar")
 		cbox.set_active(0)
 		self.close_preview()
+		self.on_clear_all_history()
 
 	def load_filesystem_side_bar(self, project_dir):
 		tv = self.xml.get_widget("treeview_filesystem")
@@ -923,7 +924,6 @@ class Ohh_UI:
 		mi.set_active(prev_rc[project_uri]["preview"])
 		cbox = self.xml.get_widget("cbox_side_bar")
 		cbox.set_active(prev_rc[project_uri][ "outline" ])
-		self.prev_next_history.clear()
 
 	def save_current_project(self):
 		if not self.current_project_uri:
@@ -1063,6 +1063,10 @@ class Ohh_UI:
 			mi = self.xml.get_widget(name)
 			mi.set_submenu(None)
 		self.prev_next_history.clear()
+		if data: # call from user interaction
+			self.clear_ohh_rc()
+
+	def clear_ohh_rc(self):
 		self.ohh_rc = {}
 		try:
 			os.unlink("%s/.ohh.rc" % os.getenv("HOME"))
