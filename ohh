@@ -309,7 +309,7 @@ class Ohh_UI:
 		title = self.main_win.get_title()
 		if "-" in title:
 			title = title.split("-")[0] + " "
-		self.main_win.set_title(title.strip() + " - " + os.path.normname(cwd))
+		self.main_win.set_title(title.strip() + " - " + os.path.basename(cwd))
 
 	def show_yes_no(self, err_msg):
 		dlg = gtk.MessageDialog(self.main_win,  gtk.DIALOG_MODAL|gtk.DIALOG_DESTROY_WITH_PARENT, \
