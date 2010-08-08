@@ -498,7 +498,7 @@ class Ohh_UI:
 		while gtk.events_pending():
 			gtk.main_iteration(False)
 
-	def scroll_in_sourceview(self, sv, lineno, delta = 5):
+	def scroll_in_sourceview(self, sv, lineno, delta = 0):
 		buffer = sv.get_buffer()
 		start = buffer.get_start_iter()
 		mark = buffer.create_mark("start", start)
