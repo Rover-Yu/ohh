@@ -558,9 +558,14 @@ class Ohh_UI:
 			if not swin:
 				return
 			fn = swin.get_data("filename")
-			self.current_filename = fn
 			if not fn:
 				return
+			if not self.replaying_history:
+				cur_fn = self.get_current_filename()
+				cur_lineno = self.get_current_lineno()
+				self.prev_next_history.record((cur_fn, cur_lineno))
+				#print "saving-his", (cur_fn, cur_lineno)
+			self.current_filename = fn
 			cbox = self.xml.get_widget("cbox_filenames")
 			store = cbox.get_model()
 			iter = store.get_iter_first()
@@ -641,19 +646,14 @@ class Ohh_UI:
 		store.set(iter, 0, fn.decode("utf8"))
 		cbox.set_active(0)
 
-	def load_one_source(self, fn, lineno = 0):
-		cur_fn = self.get_current_filename()
-		cur_lineno = self.get_current_lineno()
-		if cur_fn:
-			self.files_history_record(cur_fn)
-			if cur_lineno:
-				self.prev_next_history.record((cur_fn, cur_lineno))
+	def load_one_source(self, fn, lineno = 0, replay = False):
 		fn = os.path.normpath(fn)
-		self.current_filename = fn
+		self.replaying_history = replay
 		if fn in self.opened_files: # this source is opened, so activate it here
 			self.reload_opened_source(fn, lineno)
 		else:
 			self.load_new_source(fn, lineno)
+		self.replaying_history = False
 
 	def show_status(self, msg):
 		sts_bar = self.xml.get_widget("status_bar")
@@ -915,11 +915,12 @@ class Ohh_UI:
 			lineno = int(lineno)
 			if lineno < 0:
 				lineno = 0
-			self.load_one_source(fn, lineno)
+			self.load_one_source(fn, lineno, True)
 		cur_fn = prev_rc[project_uri]["current_filename"]
 		cur_lineno = prev_rc[project_uri]["current_lineno"]
 		if cur_fn:
-			self.load_one_source(cur_fn, int(cur_lineno))
+			cur_lineno = int(cur_lineno)
+			self.load_one_source(cur_fn, cur_lineno, True)
 		mi = self.xml.get_widget("menuitem_symbol_preview_switch")
 		mi.set_active(prev_rc[project_uri]["preview"])
 		cbox = self.xml.get_widget("cbox_side_bar")
@@ -1577,14 +1578,14 @@ class Ohh_UI:
 		if not item:
 			return
 		fn, lineno = item[0], item[1]
-		self.load_one_source(fn, lineno)
+		self.load_one_source(fn, lineno, replay=True)
 
 	def on_next_editing_pos(self, *data):
 		item = self.prev_next_history.next()
 		if not item:
 			return
 		fn, lineno = item[0], item[1]
-		self.load_one_source(fn, lineno)
+		self.load_one_source(fn, lineno, replay=True)
 
 	def on_cbox_filenames_changed(self, cbox, *data):
 		store = cbox.get_model()

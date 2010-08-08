@@ -66,8 +66,6 @@ class History(object):
 		if item in self.history:
 			self.history.remove(item)
 		self.history.insert(0, item)
-		if self.pos == -1:
-			self.pos = 0
 
 	def all(self):
 		return self.history[:]
