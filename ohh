@@ -33,7 +33,8 @@ import time
 
 C_KEYWORDS = indexer.C_KEYWORDS
 
-INSTALL_PATH = "/home/sailor/src/python/ohh" + "/"
+#INSTALL_PATH = "/home/sailor/src/python/ohh" + "/"
+INSTALL_PATH = "/usr/local/ohh" + "/"
 
 class Ohh_UI:
 	def __init__(self, project_dir = None):
@@ -50,6 +51,8 @@ class Ohh_UI:
 		self.current_filename = ""
 		self.opened_files = []
 		self.prev_current_symbol = None
+		self.replaying_history = False
+		self.fs_filter_lines = []
 		glib.timeout_add(1000, self.check_search_results)
 		self.background_search_sym_results = []
 		self.background_search_sym_results_lock = threading.Lock()
@@ -61,10 +64,9 @@ class Ohh_UI:
 		self.update_recent_project_menu()
 		if project_dir and not self.switch_project(project_dir):
 			self.current_project_uri = "file:" + project_dir
-			return
 		elif last_project_uri:
 			self.load_project_rc(last_project_uri)
-			return
+		self.setup_gui_post()
 
 	def setup_gui(self):
 		self.main_win.set_icon_from_file(INSTALL_PATH + "o.png")
@@ -120,8 +122,15 @@ class Ohh_UI:
 		store = gtk.ListStore(gobject.TYPE_STRING)
 		cbentry.set_model(store)
 		cbentry.connect("key-release-event", on_enter, self)
-
 		self.setup_shortcuts()
+	
+	def setup_gui_post(self):
+		# setup filesyste filters
+		tv = self.xml.get_widget("textview_filesystem_filter")
+		buff = tv.get_buffer()
+		filters = "\n".join(self.fs_filter_lines)
+		buff.set_text(filters)
+		tv.set_buffer(buff)
 
 	def setup_shortcuts(self):
 		accel_group = gtk.AccelGroup()
@@ -466,10 +475,13 @@ class Ohh_UI:
 		buffer.set_modified(False)
 		return buffer
 
-	def preview_one_source(self, fn, lineno):
+	def preview_one_source(self, sym, fn, lineno):
 		cur_fn = self.get_current_filename()
 		cur_lineno = self.get_current_lineno()
 		if cur_fn == fn and cur_lineno == lineno:
+			return
+		cur_sym = self.current_symbol()
+		if cur_sym != sym:
 			return
 		buffer = self.read_one_source(fn)
 		if lineno > 0:
@@ -498,7 +510,9 @@ class Ohh_UI:
 		while gtk.events_pending():
 			gtk.main_iteration(False)
 
-	def scroll_in_sourceview(self, sv, lineno, delta = 0):
+	def scroll_in_sourceview(self, sv, lineno, delta = 5):
+		if lineno == 0:
+			return
 		buffer = sv.get_buffer()
 		start = buffer.get_start_iter()
 		mark = buffer.create_mark("start", start)
@@ -506,12 +520,11 @@ class Ohh_UI:
 		total_lineno = buffer.get_line_count()
 		iter = buffer.get_iter_at_line(lineno)
 		buffer.place_cursor(iter)
-		if lineno > 0:
-			iter = buffer.get_iter_at_line(lineno + delta)
-			mark = buffer.create_mark("current", iter)
-			sv.scroll_mark_onscreen(mark)
-			while gtk.events_pending():
-				gtk.main_iteration(False)
+		iter = buffer.get_iter_at_line(lineno + delta)
+		mark = buffer.create_mark("current", iter)
+		sv.scroll_mark_onscreen(mark)
+		while gtk.events_pending():
+			gtk.main_iteration(False)
 
 	def add_sourceview(self, sv, fn, lineno=0):
 		def on_close_sv_page(evbox, evt, self, nbook, child):
@@ -648,6 +661,18 @@ class Ohh_UI:
 
 	def load_one_source(self, fn, lineno = 0, replay = False):
 		fn = os.path.normpath(fn)
+		cur_fn = self.get_current_filename()
+		cur_lineno = self.get_current_lineno()
+		if fn == cur_fn and lineno == cur_lineno:
+			return
+		if not replay:
+			if fn == cur_fn:
+				# At this case, self.on_page_switch() will be bypassed.
+				# so record history here.
+				self.prev_next_history.record((cur_fn, cur_lineno))
+			else:
+				# self.on_page_switch() will record history at such case.
+				pass
 		self.replaying_history = replay
 		if fn in self.opened_files: # this source is opened, so activate it here
 			self.reload_opened_source(fn, lineno)
@@ -801,9 +826,9 @@ class Ohh_UI:
 		if scheme_list:
 			try:
 				if is_preview:
-					scheme = scheme_list[-3]
-				else:
 					scheme = scheme_list[-2]
+				else:
+					scheme = scheme_list[-3]
 				scheme = m.get_scheme(scheme)
 			except IndexError:
 				scheme = None
@@ -916,6 +941,7 @@ class Ohh_UI:
 			if lineno < 0:
 				lineno = 0
 			self.load_one_source(fn, lineno, True)
+		self.fs_filter_lines = prev_rc[project_uri][ "fs_filter_lines" ]
 		cur_fn = prev_rc[project_uri]["current_filename"]
 		cur_lineno = prev_rc[project_uri]["current_lineno"]
 		if cur_fn:
@@ -943,6 +969,7 @@ class Ohh_UI:
 		saveinfo[ "time" ] = int(time.time())
 		cbox = self.xml.get_widget("cbox_side_bar")
 		saveinfo[ "outline" ] = cbox.get_active()
+		saveinfo[ "fs_filter_lines" ] = self.fs_filter_lines
 		saveinfo [ "current_filename" ] = self.get_current_filename()
 		saveinfo [ "current_lineno" ] = self.get_current_lineno()
 		try:
@@ -1062,7 +1089,8 @@ class Ohh_UI:
 				"menu_def_history",
 				"menu_ref_history"):
 			mi = self.xml.get_widget(name)
-			mi.set_submenu(None)
+			menu = gtk.Menu()
+			mi.set_submenu(menu)
 		self.prev_next_history.clear()
 		if data: # call from user interaction
 			self.clear_ohh_rc()
@@ -1098,6 +1126,7 @@ class Ohh_UI:
 		results = self.searcher.search_def(sym)
 		if not results:
 			return
+		sel = tv.get_selection()
 		prefix = self.current_project_uri[len("file:"):] + "/"
 		for r in results:
 			iter = store.append(parent)
@@ -1109,7 +1138,7 @@ class Ohh_UI:
 				kind = "unknown"
 			if fn.startswith(os.path.normpath(prefix)):
 				fn = fn[len(prefix)-1:]	
-			lines = file(prefix+fn).readlines() # XXX!
+			lines = file(prefix+fn).readlines() # XXX: better means?
 			line = lines[lineno-1].strip()
 			store.set(iter, 
 				0, kind.decode("utf8"),
@@ -1117,9 +1146,14 @@ class Ohh_UI:
 				2, str(lineno).decode("utf8"),
 				3, line.decode("utf8"),
 				4, prefix+fn)
+			if kind == "function":
+				sel.select_iter(iter) # XXX: ??
 		tv.expand_to_path(path)
 
-	def create_symbol_list_store(self, prefix, sym_list):
+	def create_symbol_list_store(self, prefix, sym_list, fs_filter_list):
+		"""
+			fs_filter_list is unused yet.
+		"""
 		store = gtk.TreeStore(gobject.TYPE_STRING, gobject.TYPE_STRING,
 				gobject.TYPE_STRING, gobject.TYPE_STRING, gobject.TYPE_STRING)
 		path = None
@@ -1130,7 +1164,7 @@ class Ohh_UI:
 			if sym == prefix:
 				path = store.get_path(iter)
 			n += 1
-			if n > 700: #XXX : hardcode!
+			if n > 700: #XXX : a hardcoded uplimit!
 				store.set(iter, 0, "Searched results are too *MANY*, truncated !!!".decode("utf8"))
 				break
 		return (store, path)
@@ -1380,7 +1414,7 @@ class Ohh_UI:
 		else:
 			tv.expand_row(path, False)
 
-	def create_result_store(self, search_type, results):
+	def create_result_store(self, search_type, results, fs_filter_lines):
 		"""
 			for def/ref/regex/local-regex/caller search
 		"""
@@ -1390,7 +1424,6 @@ class Ohh_UI:
 				gobject.TYPE_STRING, gobject.TYPE_STRING, gobject.TYPE_STRING)
 		if results:
 			for r in results:
-				iter = store.append(None)
 				fn = r[0]
 				caller = r[1]
 				lineno = r[2]
@@ -1406,6 +1439,14 @@ class Ohh_UI:
 					fn = fn[len(prefix):]
 				if real_fn[0] != "/":
 					real_fn = prefix + fn
+				if fs_filter_lines:
+					should_show = False
+					for fs_filter in fs_filter_lines:
+						if fn.startswith(fs_filter):
+							should_show = True
+							break
+					if not should_show:
+						continue
 				lines = file(real_fn).readlines() # XXX!
 				line = lines[lineno-1].strip()
 				kind_caller = ""
@@ -1413,6 +1454,7 @@ class Ohh_UI:
 					kind_caller = caller
 				if kind:
 					kind_caller = kind + ":" + kind_caller
+				iter = store.append(None)
 				store.set(iter, 
 					0, kind_caller.decode("utf8"),
 					1, fn.decode("utf8"), 
@@ -1432,15 +1474,15 @@ class Ohh_UI:
 		res_win.set_border_width(5)
 		res_win.connect("key-release-event", self.on_result_window_key_release_event)
 		if search_type == 1:
-			res_win.set_title("References of '%s'" % sym)
+			res_win.set_title("'%s' references" % sym)
 		elif search_type == 0:
-			res_win.set_title("Definitions of '%s'" % sym)
+			res_win.set_title("'%s' definitions" % sym)
 		elif search_type == 2:
-			res_win.set_title("Regex of '%s'" % sym)
+			res_win.set_title("'%s' regex" % sym)
 		elif search_type == 3:
-			res_win.set_title("Local regex of '%s'" % sym)
+			res_win.set_title("'%s' regex" % sym)
 		elif search_type == 4:
-			res_win.set_title("What calls '%s'" % sym)
+			res_win.set_title("'%s''s calling points" % sym)
 
 		tv = gtk.TreeView()
 		tv.set_data("root-sym", sym)
@@ -1475,6 +1517,11 @@ class Ohh_UI:
 	def on_btn_search_start_clicked(self, *data):
 		search_win = self.xml.get_widget("search_window")
 		search_win.hide_all()
+		tv_fs_filters = self.xml.get_widget("textview_filesystem_filter")
+		buffer = tv_fs_filters.get_buffer()
+		start = buffer.get_start_iter()
+		end = buffer.get_end_iter()
+		self.fs_filter_lines = buffer.get_text(start, end).strip().split("\n")
 		cbox = self.xml.get_widget("cbox_search_type")
 		cbentry = self.xml.get_widget("cbentry_symbol")
 		search_type = cbox.get_active()
@@ -1492,7 +1539,8 @@ class Ohh_UI:
 			store.set(iter, 0, sym.decode("utf8"))
 		gdkwin = self.xml.get_widget("main_window").get_root_window()
 		fn = self.get_current_filename()
-		thr = threading.Thread(target=self.background_search_sym, args=(sym, search_type, False, fn))
+		thr = threading.Thread(target=self.background_search_sym, 
+						args=(sym, search_type, False, fn, self.fs_filter_lines[:]))
 		thr.start()
 		self.show_status("Searching '%s'" % sym)
 
@@ -1605,27 +1653,27 @@ class Ohh_UI:
 		if 65307 ==  evt.keyval: # XXX: this is 'Esc'
 			win.hide_all()
 
-	def background_search_sym(self, sym, search_type, is_preview, fn = ""):
+	def background_search_sym(self, sym, search_type, is_preview, fn = "", fs_filter_lines = []):
 		store = None
 		path = None
 		if search_type == 0:
 			results = self.searcher.search_def(sym)
-			store = self.create_result_store(search_type, results)
+			store = self.create_result_store(search_type, results, fs_filter_lines)
 		elif search_type == 1:
 			results = self.searcher.search_ref(sym)
-			store = self.create_result_store(search_type, results)
+			store = self.create_result_store(search_type, results, fs_filter_lines)
 		elif search_type == 2:
 			results = self.searcher.search_regex(sym)
-			store = self.create_result_store(search_type, results)
+			store = self.create_result_store(search_type, results, fs_filter_lines)
 		elif search_type == 3:
 			results = self.searcher.local_find(sym, fn)
-			store = self.create_result_store(search_type, results)
+			store = self.create_result_store(search_type, results, fs_filter_lines)
 		elif search_type == 4:
 			results = self.searcher.search_caller(sym)
-			store = self.create_result_store(search_type, results)
+			store = self.create_result_store(search_type, results, fs_filter_lines)
 		elif search_type == -1:
 			results = self.searcher.symbol_list(sym)
-			store, path = self.create_symbol_list_store(sym, results)
+			store, path = self.create_symbol_list_store(sym, results, fs_filter_lines)
 		else:
 			print "oops, search_type =", search_type
 		
@@ -1650,6 +1698,7 @@ class Ohh_UI:
 				rest.append(result)
 		self.background_search_sym_results = rest
 		self.background_search_sym_results_lock.release()
+		pv_sym = ""
 		pv_fn = ""
 		pv_lineno = 0
 		for sym, search_type, is_preview, results, store_path in results_list:
@@ -1660,10 +1709,13 @@ class Ohh_UI:
 					self.ref_history_record(sym)
 				if search_type == 0 and results:
 					self.def_history_record(sym)
+				gtk.gdk.threads_enter()
 				self.create_result_window(search_type, sym, results=results, store=store)
+				gtk.gdk.threads_leave()
 			elif is_preview and search_type == 0: #symbol must be definiation search.
 				if not results:
 					continue
+				pv_sym = sym
 				# TODO: need more smarter here!
 				for pv_fn, caller, pv_lineno, attrtab in results:
 					kind = attrtab.get("kind")
@@ -1674,7 +1726,9 @@ class Ohh_UI:
 
 		if pv_fn:
 			prefix = self.current_project_uri[len("file:"):] + "/"
-			self.preview_one_source(prefix+pv_fn, pv_lineno)
+			gtk.gdk.threads_enter()
+			self.preview_one_source(pv_sym, prefix+pv_fn, pv_lineno)
+			gtk.gdk.threads_leave()
 		elif results_list:
 			self.show_status("")
 		return True
@@ -1695,7 +1749,8 @@ class Ohh_UI:
 		dlg_about.hide_all()
 
 def startup(project_dir=None):
-	glib.threads_init()
+	gtk.gdk.threads_init()
+	#in old PyGTK, we should use gtk.threads_init()
 	Ohh_UI(project_dir)
 	gtk.main()
 
