@@ -64,6 +64,7 @@ class Ohh_UI:
 		self.update_recent_project_menu()
 		if project_dir and not self.switch_project(project_dir):
 			self.current_project_uri = "file:" + project_dir
+			self.load_project_rc(self.current_project_uri)
 		elif last_project_uri:
 			self.load_project_rc(last_project_uri)
 		self.setup_gui_post()
@@ -1442,7 +1443,8 @@ class Ohh_UI:
 				if fs_filter_lines:
 					should_show = False
 					for fs_filter in fs_filter_lines:
-						if fn.startswith(fs_filter):
+						fs_filter = fs_filter.strip()
+						if fs_filter and fn.startswith(fs_filter):
 							should_show = True
 							break
 					if not should_show:
