@@ -152,11 +152,11 @@ class Cscope(Indexer):
 		found, return [("filename", "caller", lineno), ....]
 		not found, return None
 		"""
-		out = self.runCommand(("cscope", "-L", "-v", "-0", sym))
+		out = self.runCommand(("cscope", "-q", "-L", "-v", "-0", sym))
 		return self.handleCscopeOutput(out)
 	
 	def search_regex(self, sym):
-		out = self.runCommand(("cscope", "-L", "-v", "-6", sym))
+		out = self.runCommand(("cscope", "-q", "-L", "-v", "-6", sym))
 		return self.handleCscopeOutput(out)
 
 	###############
