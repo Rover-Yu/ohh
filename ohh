@@ -936,6 +936,8 @@ class Ohh_UI:
 		if self.switch_project(project_uri[len("file:"):]):
 			return
 		self.current_project_uri = project_uri
+		if not prev_rc.get(project_uri):
+			return
 		for fn in prev_rc[project_uri]["opened"]:
 			lineno = prev_rc[project_uri]["opened"][fn]
 			lineno = int(lineno)
