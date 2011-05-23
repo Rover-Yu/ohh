@@ -466,14 +466,17 @@ class Ohh_UI:
 		try:
 			txt = open(fn).read()
 		except IOError:
+			print fn
 		        return False
-		if not txt:
-			print fn, txt
-			return False
+		finally:
+			if not txt:
+				print fn, txt
+				return False
 		buffer.set_text(self.text_to_utf8(txt))
 		buffer.set_data('filename', fn)
 		buffer.end_not_undoable_action()
 		buffer.set_modified(False)
+		self.set_buffer_font(buffer, self.font_name)
 		return buffer
 
 	def preview_one_source(self, sym, fn, lineno):
@@ -938,6 +941,7 @@ class Ohh_UI:
 		self.current_project_uri = project_uri
 		if not prev_rc.get(project_uri):
 			return
+		self.font_name = prev_rc[project_uri].get("font", "")
 		for fn in prev_rc[project_uri]["opened"]:
 			lineno = prev_rc[project_uri]["opened"][fn]
 			lineno = int(lineno)
@@ -972,6 +976,7 @@ class Ohh_UI:
 		saveinfo[ "time" ] = int(time.time())
 		cbox = self.xml.get_widget("cbox_side_bar")
 		saveinfo[ "outline" ] = cbox.get_active()
+		saveinfo[ "font" ] = self.font_name
 		saveinfo[ "fs_filter_lines" ] = self.fs_filter_lines
 		saveinfo [ "current_filename" ] = self.get_current_filename()
 		saveinfo [ "current_lineno" ] = self.get_current_lineno()
@@ -1052,6 +1057,40 @@ class Ohh_UI:
 			iter = store.prepend()
 			store.set(iter, 0, sym.decode("utf8"))
 			cbentry.set_active(0)
+
+	def set_buffer_font(self, buffer, font_name):
+		if not font_name:
+			return
+		begin, end = buffer.get_bounds()
+		table = buffer.get_tag_table()
+		if table.lookup("font"):
+			buffer.remove_tag_by_name("font", begin, end)
+		tag = buffer.create_tag(name = "font", font=font_name)
+		buffer.apply_tag(tag, begin, end)
+
+	def on_select_font(self, *data):
+		dlg = gtk.FontSelectionDialog("Font")
+		if self.font_name:
+			dlg.set_font_name(self.font_name)
+		response = dlg.run()
+		dlg.hide()
+		if gtk.RESPONSE_OK != response:
+			return
+		font_name = dlg.get_font_name()
+		self.font_name = font_name
+		hpaned = self.xml.get_widget("hpaned")
+		nbook = hpaned.get_child2()
+		n_pages = nbook.get_n_pages()
+		for n in range(n_pages):
+			swin = nbook.get_nth_page(n)
+			sv = swin.get_data("editor")
+			buffer = sv.get_buffer()
+			self.set_buffer_font(buffer, font_name)
+		swin = self.xml.get_widget("swin_preview")
+		buffer = sv.get_buffer()
+		self.set_buffer_font(buffer, font_name)
+		swin.show_all()
+		nbook.show_all()
 
 	def on_search_def(self, *data):
 		sym = self.current_symbol()

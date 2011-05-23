@@ -68,6 +68,15 @@
                       </widget>
                     </child>
                     <child>
+                      <widget class="GtkImageMenuItem" id="menuitem_select_font">
+                        <property name="label">gtk-select-font</property>
+                        <property name="visible">True</property>
+                        <property name="use_underline">True</property>
+                        <property name="use_stock">True</property>
+                        <signal name="activate" handler="on_select_font"/>
+                      </widget>
+                    </child>
+                    <child>
                       <widget class="GtkImageMenuItem" id="imagemenuitem5">
                         <property name="label">gtk-quit</property>
                         <property name="visible">True</property>
