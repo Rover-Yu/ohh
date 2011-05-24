@@ -173,6 +173,8 @@ class Ohh_UI:
 			self.startup_preview()
 		else:
 			self.show_status("Symbol preview disabled")
+			self.prev_current_symbol = None
+			self.disable_preview_sourceview()
 
 	def on_close_source(self, mi = None, page_num = -1):
 		hpaned = self.xml.get_widget("hpaned")
@@ -513,6 +515,14 @@ class Ohh_UI:
 		swin.show_all()
 		while gtk.events_pending():
 			gtk.main_iteration(False)
+
+	def disable_preview_sourceview(self):
+		swin = self.xml.get_widget("swin_preview")
+		child = swin.get_child()
+		if child:
+			swin.remove(child)
+			vpaned = self.xml.get_widget("vpaned")
+			vpaned.set_position(vpaned.get_property("max-position"))
 
 	def scroll_in_sourceview(self, sv, lineno, delta = 5):
 		if lineno == 0:
