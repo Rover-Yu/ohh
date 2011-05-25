@@ -444,7 +444,11 @@ class Ohh_UI:
 
 	def read_one_source(self, fn):
 		f = gio.File(fn)
-		info = f.query_info("*")
+		try:
+			info = f.query_info("*")
+		except gio.Error:
+			self.show_status("Failed to open file: %s" % fn)
+			return False
 		mime_type = info.get_content_type()
 		language = None
 		buffer = gtksv.Buffer()
@@ -490,6 +494,8 @@ class Ohh_UI:
 		if cur_sym != sym:
 			return
 		buffer = self.read_one_source(fn)
+		if not buffer:
+			return
 		if lineno > 0:
 			lineno -= 1 # rebase from 0
 		sv = self.create_sourceview(buffer, lineno, True)
@@ -659,6 +665,8 @@ class Ohh_UI:
 
 	def load_new_source(self, fn, lineno = 0):
 		buffer = self.read_one_source(fn)
+		if not buffer:
+			return
 		if lineno > 0:
 			lineno -= 1 # rebase from 0
 		sv = self.create_sourceview(buffer, lineno)
