@@ -1582,9 +1582,10 @@ class Ohh_UI:
 		buffer = tv_fs_filters.get_buffer()
 		start = buffer.get_start_iter()
 		end = buffer.get_end_iter()
-		filter_content = buffer.get_text(start, end).strip()
-		if filter_content:
-			self.fs_filter_lines = filter_content.split("\n")
+		fs_filter_lines = buffer.get_text(start, end).strip()
+		self.fs_filter_lines = []
+		if fs_filter_lines:
+			self.fs_filter_lines = fs_filter_lines.split("\n")
 		cbox = self.xml.get_widget("cbox_search_type")
 		cbentry = self.xml.get_widget("cbentry_symbol")
 		search_type = cbox.get_active()
