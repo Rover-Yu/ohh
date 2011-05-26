@@ -1173,6 +1173,8 @@ class Ohh_UI:
 		if not parent: # this is a *pure* symbol line
 			parent = iter
 		else: # then load it
+			sym = store.get_value(parent, 0)
+			self.def_history_record(sym)
 			self.on_one_search_result_activated(tv, path, column)
 			return
 		if store.iter_has_child(parent): # already loaded symbol details
