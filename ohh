@@ -1801,13 +1801,13 @@ class Ohh_UI:
 		return True
 
 	def text_to_utf8(self, text):
-		encoding_list = ("utf8", "gb2312", "gb18030")
+		encoding_list = ("utf8", "gb2312", "gb18030", "iso8859_1")
 		for encoding in encoding_list:
 			try:
 				return text.decode(encoding)
 			except UnicodeDecodeError:
 				pass
-		return None
+		return "Can not translate this file into UTF-8"
 
 	def on_about(self, mi):
 		dlg_about = self.xml.get_widget("dialog_about")
