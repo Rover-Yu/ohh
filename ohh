@@ -53,6 +53,7 @@ class Ohh_UI:
 		self.prev_current_symbol = None
 		self.replaying_history = False
 		self.fs_filter_lines = []
+		self.font_name = ""
 		glib.timeout_add(1000, self.check_search_results)
 		self.background_search_sym_results = []
 		self.background_search_sym_results_lock = threading.Lock()
