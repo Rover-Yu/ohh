@@ -470,6 +470,7 @@ class Ohh_UI:
 		begin, end = buffer.get_bounds()
 		marks = buffer.remove_source_marks(begin, end)
 		buffer.begin_not_undoable_action()
+		txt = ""
 		try:
 			txt = open(fn).read()
 		except IOError:
