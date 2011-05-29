@@ -494,17 +494,21 @@ class Ohh_UI:
 		cur_sym = self.current_symbol()
 		if cur_sym != sym:
 			return
-		buffer = self.read_one_source(fn)
-		if not buffer:
-			return
-		if lineno > 0:
-			lineno -= 1 # rebase from 0
-		sv = self.create_sourceview(buffer, lineno, True)
-		sv.set_data("filename", fn)
-		sv.connect("button-press-event", self.on_preview_source_button_press_event)
-		self.add_preview_sourceview(sv, lineno)
-		self.scroll_in_sourceview(sv, lineno)
-		self.show_status("Previewing in " + fn)
+		mi = self.xml.get_widget("menuitem_symbol_preview_switch")
+		if mi.get_active():
+			buffer = self.read_one_source(fn)
+			if not buffer:
+				return
+			if lineno > 0:
+				lineno -= 1 # rebase from 0
+			sv = self.create_sourceview(buffer, lineno, True)
+			sv.set_data("filename", fn)
+			sv.connect("button-press-event", self.on_preview_source_button_press_event)
+			self.add_preview_sourceview(sv, lineno)
+			self.scroll_in_sourceview(sv, lineno)
+			self.show_status("Previewing in " + fn)
+		else:
+			self.load_one_source(fn, lineno)
 
 	def add_preview_sourceview(self, sv, lineno):
 		swin = self.xml.get_widget("swin_preview")
@@ -710,9 +714,6 @@ class Ohh_UI:
 		sts_bar.show_all()
 
 	def startup_preview(self):
-		mi = self.xml.get_widget("menuitem_symbol_preview_switch")
-		if not mi.get_active():
-			return
 		sym = self.current_symbol()
 		if sym in C_KEYWORDS:
 			return
@@ -801,6 +802,8 @@ class Ohh_UI:
 		nbook.set_current_page(c)
 
 	def on_move_in_main_sv(self, sv, evt):
+		mi = self.xml.get_widget("menuitem_symbol_preview_switch")
+		preview_on = mi.get_active()
 		if evt.type == gtk.gdk.KEY_PRESS:
 			if evt.state & gtk.gdk.CONTROL_MASK:
 				if evt.keyval == 65365: # PageUp
@@ -810,13 +813,19 @@ class Ohh_UI:
 					self.switch_sourceview(+1)
 					return True
 				if evt.keyval == ord("]"):
-					self.load_preview_source()
+					if preview_on:
+						self.load_preview_source()
+					else:
+						# this will jump into new source, instead of open preview window
+						# pls see self.preview_one_source()
+						self.startup_preview()
 					return True
 		popup = False
 		if evt.type == gtk.gdk.BUTTON_PRESS and evt.button == 3:
 			self.popup_menu(sv, evt.get_time())
 			popup = True
-		self.startup_preview()
+		if preview_on:
+			self.startup_preview()
 		return popup
 
 	def show_changed_flag(self, buffer):
