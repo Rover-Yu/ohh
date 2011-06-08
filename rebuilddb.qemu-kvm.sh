@@ -1,4 +1,4 @@
-#! /bin/sh -x
+#! /bin/sh
 
 
 blacklist="(sparc)|(arm)|(microblaze)|(powerpc)|(ppc)|(s390)|(mips)|(cris)|(m68k)|(alpha)|(bsd-user)|(darwin-user)|(linux-user)|(ppc)|(sh4)|(ia64)|(tests)|(kvm/)|(kvm-stub.c)|(win32)"
@@ -20,7 +20,9 @@ for fn in `grep OBSOLETE_KVM_IMPL  * -rn | cut -d : -f 1 | sort | uniq | grep "\
 	unifdef -U OBSOLETE_KVM_IMPL $fn > $fn.newkvm;
 done
 
-find -name "*.[chsS]" | grep -v -E "${blacklist}|${unifdef_list}" >> cscope.files
+set -x
+find -name "*.[chsS]" | grep -v -E "${blacklist}${unifdef_list}" >> cscope.files
+set +x
 
 cscope -b -q
 ctags --excmd=number --fields=afiKlmnSzt -L cscope.files
