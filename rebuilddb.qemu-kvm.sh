@@ -8,16 +8,18 @@ find -name "*.newkvm.*"	-exec rm -f {} \;
 rm -f cscope.files
 touch cscope.files
 unifdef_list=""
-for fn in `grep CONFIG_USER_ONLY  * -rn | cut -d : -f 1 | sort | uniq | grep "\.[chSs]$"`; do
+for fn in `grep CONFIG_USER_ONLY  * -rn | grep -v -E "${blacklist}" | cut -d : -f 1 | sort | uniq | grep "\.[chSs]$"`; do
 	unifdef_list="${unifdef_list}|(${fn})"
-	echo "${fn}.newkvm" >> cscope.files
-	unifdef -U CONFIG_USER_ONLY $fn > $fn.newkvm;
+	newkvm_c="${fn}.newkvm.c"
+	echo "${newkvm_c}" >> cscope.files
+	unifdef -U CONFIG_USER_ONLY $fn > ${newkvm_c}	;
 done
 
-for fn in `grep OBSOLETE_KVM_IMPL  * -rn | cut -d : -f 1 | sort | uniq | grep "\.[chSs]$"`; do
+for fn in `grep OBSOLETE_KVM_IMPL  * -rn | grep -v -E "${blacklist}" | cut -d : -f 1 | sort | uniq | grep "\.[chSs]$"`; do
 	unifdef_list="${unifdef_list}|(${fn})"
-	echo "${fn}.newkvm" >> cscope.files
-	unifdef -U OBSOLETE_KVM_IMPL $fn > $fn.newkvm;
+	newkvm_c="${fn}.newkvm.c"
+	echo "${newkvm_c}" >> cscope.files
+	unifdef -U OBSOLETE_KVM_IMPL $fn > ${newkvm_c}	;
 done
 
 set -x
