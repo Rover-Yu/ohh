@@ -127,13 +127,17 @@ class Cscope(Indexer):
 		lines = output.split("\n")
 		results = []
 		result_start = False
-		for line in lines:
-			if line.startswith("cscope:"):
-				result_start = True
-				continue
+		i = 0
+		nr_lines = len(lines)
+		while i < nr_lines:
+			line = lines[i]
 			if not result_start:
+				if line.startswith("cscope:"):
+					result_start = True
+				i += 1
 				continue
 			if not line.strip():
+				i += 1
 				continue
 			try:
 				#fs/btrfs/extent_io.c alloc_extent_state 130 spin_lock_irqsave(&leak_lock, flags);
@@ -142,8 +146,9 @@ class Cscope(Indexer):
 					caller = ""
 				results.append((fn, caller, int(lineno), {}))
 			except ValueError:
-				print "cscope said", line
-				continue
+				print "cscope said '%s' try to fix by merge with next line '%s'" % (line, lines[i+1].strip())
+				lines[i+1] = line + " " + lines[i+1].strip()
+			i += 1
 		return results
 
 	def search_ref(self, sym):
