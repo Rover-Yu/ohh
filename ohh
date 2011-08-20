@@ -1825,6 +1825,65 @@ class Ohh_UI:
 		dlg_about.run()
 		dlg_about.hide_all()
 
+	def on_btn_reset_fsfilters_clicked(self, btn, *args):
+		tv = self.xml.get_widget("textview_filesystem_filter")
+		buff = tv.get_buffer()
+		buff.set_text("")
+		tv.set_buffer(buff)
+		self.fs_filter_lines = []
+		return True
+
+	def on_btn_load_fsfilters_clicked(self, btn, *args):
+		while True:
+			chooser = gtk.FileChooserDialog(title="Load filters", \
+					action=gtk.FILE_CHOOSER_ACTION_OPEN, \
+					buttons= (gtk.STOCK_CANCEL, gtk.RESPONSE_REJECT, \
+							gtk.STOCK_OK, gtk.RESPONSE_ACCEPT))
+			chooser.set_local_only(True)
+			res = chooser.run()
+			uri = chooser.get_uri()
+			chooser.destroy()
+			if res == gtk.RESPONSE_REJECT:
+				break
+			saved_fn = uri[len("file:"):]
+			tv = self.xml.get_widget("textview_filesystem_filter")
+			buff = tv.get_buffer()
+			begin, end = buff.get_bounds()
+			old_show = buff.get_text(begin, end)
+			try:
+				text = file(saved_fn, "r").read()
+				new_filters = eval(text)
+				to_show = "\n".join(new_filters)
+				buff.set_text(to_show)
+			except:
+				raise
+				self.show_error("Failed to load current filesystem filters")
+				buff.set_text(old_show)
+			tv.set_buffer(buff)
+			break
+		return True
+
+	def on_btn_store_fsfilters_clicked(self, btn, *args):
+		while True:
+			chooser = gtk.FileChooserDialog(title="Save filters", \
+					action=gtk.FILE_CHOOSER_ACTION_SAVE, \
+					buttons= (gtk.STOCK_CANCEL, gtk.RESPONSE_REJECT, \
+							gtk.STOCK_OK, gtk.RESPONSE_ACCEPT))
+			chooser.set_local_only(True)
+			res = chooser.run()
+			uri = chooser.get_uri()
+			chooser.destroy()
+			if res == gtk.RESPONSE_REJECT:
+				break
+			saved_fn = uri[len("file:"):]
+			try:
+				file(saved_fn, "w").write(str(self.fs_filter_lines))
+			except:
+				raise
+				self.show_error("Failed to save current filesystem filters")
+			break
+		return True
+
 def startup(project_dir=None):
 	gtk.gdk.threads_init()
 	#in old PyGTK, we should use gtk.threads_init()
