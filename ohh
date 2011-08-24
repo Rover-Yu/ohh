@@ -278,11 +278,11 @@ class Ohh_UI:
 		self.load_one_source(fn, lineno)
 
 	def get_current_filename(self, n = -1):
-		if n == -1:
-			return self.current_filename
 		hpaned = self.xml.get_widget("hpaned")
 		nbook = hpaned.get_child2()
 		if not nbook:	return ""
+		if n == -1:
+			n = nbook.get_current_page()
 		swin = nbook.get_nth_page(n)
 		if not swin:	return ""
 		fn = swin.get_data("filename")
@@ -575,16 +575,10 @@ class Ohh_UI:
 		def on_page_removed(nbook, page, page_num, self):
 			# after remove a source page
 			# according to possible new current page, update "cbox_filenames"
-			self.current_filename = ""
 			cbox = self.xml.get_widget("cbox_filenames")
 			store = cbox.get_model()
-			n = nbook.get_current_page()
-			swin = nbook.get_nth_page(n)
-			if not swin:
-				return
-			fn = swin.get_data("filename")
-			if not fn:
-				return
+			fn = self.get_current_filename()
+			self.current_filename = fn
 			iter = store.get_iter_first()
 			while iter and store.get_value(iter, 0) != fn.decode("utf8"):
 				iter = store.iter_next(iter)
