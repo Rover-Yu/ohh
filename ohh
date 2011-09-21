@@ -47,7 +47,7 @@ class Ohh_UI:
 		self.xml = xml
 		self.searcher = None
 		self.prev_next_history = searcher.History()
-		self.current_project_uri = None
+		self.current_project_path = None
 		self.current_filename = ""
 		self.opened_files = []
 		self.prev_current_symbol = None
@@ -61,13 +61,13 @@ class Ohh_UI:
 		if project_dir:
 			project_dir = os.path.abspath(project_dir)
 			project_dir = os.path.normpath(project_dir)
-		last_project_uri, self.ohh_rc = self.scan_recent_project()
+		last_project_path, self.ohh_rc = self.scan_recent_project()
 		self.update_recent_project_menu()
 		if project_dir and not self.switch_project(project_dir):
-			self.current_project_uri = "file:" + project_dir
-			self.load_project_rc(self.current_project_uri)
-		elif last_project_uri:
-			self.load_project_rc(last_project_uri)
+			self.current_project_path = project_dir
+			self.load_project_rc(self.current_project_path)
+		elif last_project_path:
+			self.load_project_rc(last_project_path)
 		self.setup_gui_post()
 
 	def setup_gui(self):
@@ -344,30 +344,29 @@ class Ohh_UI:
 					buttons= (gtk.STOCK_CANCEL, gtk.RESPONSE_REJECT, \
 							gtk.STOCK_OK, gtk.RESPONSE_ACCEPT))
 			chooser.set_local_only(True)
-			if self.current_project_uri:
-				chooser.set_current_folder_uri(self.current_project_uri)
+			if self.current_project_path:
+				chooser.set_current_folder(self.current_project_path)
 			res = chooser.run()
-			uri = chooser.get_uri()
+			project_dir = chooser.get_filename()
 			chooser.destroy()
 			if res == gtk.RESPONSE_REJECT:
 				return
-			project_dir = uri[len("file:"):]
 			project_dir = os.path.abspath(project_dir)
 			project_dir = os.path.normpath(project_dir)
 			err_msg = self.switch_project(project_dir)
 			if not err_msg:
 				self.close_project()
-				self.current_project_uri = "file:"+project_dir
+				self.current_project_path = project_dir
 				break
 			self.show_error(err_msg)
 		self.load_project()
 
 	def load_project(self):
-		if self.current_project_uri in self.ohh_rc:
-			self.load_project_rc(self.current_project_uri)
+		if self.current_project_path in self.ohh_rc:
+			self.load_project_rc(self.current_project_path)
 
 	def close_project(self):
-		if not self.current_project_uri:
+		if not self.current_project_path:
 			return
 		self.save_current_project()
 		self.update_recent_project_menu()
@@ -914,7 +913,7 @@ class Ohh_UI:
 			self.show_status(err_msg)
 			return
 		self.close_project()
-		self.current_project_uri = "file:" + cwd
+		self.current_project_path = cwd
 		self.load_project()
 
 	def update_recent_project_menu(self):
@@ -925,7 +924,6 @@ class Ohh_UI:
 		project_list = gtk.Menu()
 		recent.set_submenu(project_list)
 		for proj in self.ohh_rc:
-			proj = proj[len("file:"):]
 			proj = os.path.abspath(proj)
 			proj = os.path.normpath(proj)
 			mi = gtk.MenuItem(proj, False)
@@ -947,43 +945,43 @@ class Ohh_UI:
 			prev_rc = {}
 		if not prev_rc:
 			return "", {}
-		project_uri = ""
+		project_path = ""
 		project_time = 0
 		for proj in prev_rc:
 			if prev_rc[proj]["time"] > project_time:
-				project_uri = proj
+				project_path = proj
 				project_time = prev_rc[proj]["time"]
-		return project_uri, prev_rc
+		return project_path, prev_rc
 
-	def load_project_rc(self, project_uri):
+	def load_project_rc(self, project_path):
 		prev_rc = self.ohh_rc
-		if not project_uri or not prev_rc:
+		if not project_path or not prev_rc:
 			return
-		if self.switch_project(project_uri[len("file:"):]):
+		if self.switch_project(project_path):
 			return
-		self.current_project_uri = project_uri
-		if not prev_rc.get(project_uri):
+		self.current_project_path = project_path
+		if not prev_rc.get(project_path):
 			return
-		self.font_name = prev_rc[project_uri].get("font", "")
-		for fn in prev_rc[project_uri]["opened"]:
-			lineno = prev_rc[project_uri]["opened"][fn]
+		self.font_name = prev_rc[project_path].get("font", "")
+		for fn in prev_rc[project_path]["opened"]:
+			lineno = prev_rc[project_path]["opened"][fn]
 			lineno = int(lineno)
 			if lineno < 0:
 				lineno = 0
 			self.load_one_source(fn, lineno, True)
-		self.fs_filter_lines = prev_rc[project_uri][ "fs_filter_lines" ]
-		cur_fn = prev_rc[project_uri]["current_filename"]
-		cur_lineno = prev_rc[project_uri]["current_lineno"]
+		self.fs_filter_lines = prev_rc[project_path][ "fs_filter_lines" ]
+		cur_fn = prev_rc[project_path]["current_filename"]
+		cur_lineno = prev_rc[project_path]["current_lineno"]
 		if cur_fn:
 			cur_lineno = int(cur_lineno)
 			self.load_one_source(cur_fn, cur_lineno, True)
 		mi = self.xml.get_widget("menuitem_symbol_preview_switch")
-		mi.set_active(prev_rc[project_uri]["preview"])
+		mi.set_active(prev_rc[project_path]["preview"])
 		cbox = self.xml.get_widget("cbox_side_bar")
-		cbox.set_active(prev_rc[project_uri][ "outline" ])
+		cbox.set_active(prev_rc[project_path][ "outline" ])
 
 	def save_current_project(self):
-		if not self.current_project_uri:
+		if not self.current_project_path:
 			return
 		saveinfo = { }
 		mi = self.xml.get_widget("menuitem_symbol_preview_switch")
@@ -1014,7 +1012,7 @@ class Ohh_UI:
 				prev_rc = {}
 		except IOError:
 			prev_rc = {}
-		prev_rc[self.current_project_uri] = saveinfo
+		prev_rc[self.current_project_path] = saveinfo
 		self.ohh_rc = prev_rc
 		rc = open("%s/.ohh.rc" % os.getenv("HOME"), "w")
 		rc.write("{\n\n")
@@ -1194,7 +1192,7 @@ class Ohh_UI:
 		if not results:
 			return
 		sel = tv.get_selection()
-		prefix = self.current_project_uri[len("file:"):] + "/"
+		prefix = self.current_project_path + "/"
 		for r in results:
 			iter = store.append(parent)
 			fn = r[0]
@@ -1447,7 +1445,7 @@ class Ohh_UI:
 		results = []
 		if sym:
 			results = self.searcher.search_caller(sym)
-		prefix = self.current_project_uri[len("file:"):] + "/"
+		prefix = self.current_project_path + "/"
 		this = iter
 		for r in results:
 			fn = r[0]
@@ -1485,7 +1483,7 @@ class Ohh_UI:
 		"""
 			for def/ref/regex/local-regex/caller search
 		"""
-		prefix = self.current_project_uri[len("file:"):]
+		prefix = self.current_project_path
 		prefix = os.path.normpath(prefix) + "/"
 		store = gtk.TreeStore(gobject.TYPE_STRING, gobject.TYPE_STRING,
 				gobject.TYPE_STRING, gobject.TYPE_STRING, gobject.TYPE_STRING)
@@ -1796,7 +1794,7 @@ class Ohh_UI:
 				print "oops search results:",sym, search_type, is_preview, results
 
 		if pv_fn:
-			prefix = self.current_project_uri[len("file:"):] + "/"
+			prefix = self.current_project_path + "/"
 			gtk.gdk.threads_enter()
 			self.preview_one_source(pv_sym, prefix+pv_fn, pv_lineno)
 			gtk.gdk.threads_leave()
@@ -1835,11 +1833,10 @@ class Ohh_UI:
 							gtk.STOCK_OK, gtk.RESPONSE_ACCEPT))
 			chooser.set_local_only(True)
 			res = chooser.run()
-			uri = chooser.get_uri()
+			saved_fn = chooser.get_filename()
 			chooser.destroy()
 			if res == gtk.RESPONSE_REJECT:
 				break
-			saved_fn = uri[len("file:"):]
 			tv = self.xml.get_widget("textview_filesystem_filter")
 			buff = tv.get_buffer()
 			begin, end = buff.get_bounds()
@@ -1865,11 +1862,10 @@ class Ohh_UI:
 							gtk.STOCK_OK, gtk.RESPONSE_ACCEPT))
 			chooser.set_local_only(True)
 			res = chooser.run()
-			uri = chooser.get_uri()
+			saved_fn = chooser.get_filename()
 			chooser.destroy()
 			if res == gtk.RESPONSE_REJECT:
 				break
-			saved_fn = uri[len("file:"):]
 			try:
 				file(saved_fn, "w").write(str(self.fs_filter_lines))
 			except:
