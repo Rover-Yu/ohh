@@ -1549,6 +1549,13 @@ class Ohh_UI:
 		return store
 
 	def create_result_window(self, search_type, sym, results=[], store=None):
+		if len(results) == 1:
+			if search_type == 0: # skip result list window, just jump to source code directly
+				r = results[0]
+				fn = r[0]
+				lineno = r[2]
+				self.load_one_source(fn, lineno)
+				return
 		res_win = gtk.Window(gtk.WINDOW_TOPLEVEL)
 		res_win.set_icon_from_file(INSTALL_PATH + "o.png")
 		res_win.set_border_width(5)
