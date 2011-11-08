@@ -127,6 +127,7 @@ class Ohh_UI:
 		self.setup_shortcuts()
 	
 	def setup_gui_post(self):
+		self.show_status("")
 		# setup filesyste filters
 		tv = self.xml.get_widget("textview_filesystem_filter")
 		buff = tv.get_buffer()
@@ -702,10 +703,16 @@ class Ohh_UI:
 		self.replaying_history = False
 
 	def show_status(self, msg):
-		sts_bar = self.xml.get_widget("status_bar")
-		sts_bar.pop(0)
-		sts_bar.push(0, msg)
-		sts_bar.show_all()
+		mi = self.xml.get_widget("menuitem_hide_status_line")
+		hide_status_line = mi.get_active()
+		hbox = self.xml.get_widget("hbox_bottom")
+		if hide_status_line:
+			hbox.hide()
+		else:
+			sts_bar = self.xml.get_widget("status_bar")
+			sts_bar.pop(0)
+			sts_bar.push(0, msg)
+			hbox.show_all()
 
 	def startup_preview(self):
 		sym = self.current_symbol()
@@ -963,22 +970,24 @@ class Ohh_UI:
 		if not prev_rc.get(project_path):
 			return
 		self.font_name = prev_rc[project_path].get("font", "")
-		for fn in prev_rc[project_path]["opened"]:
+		for fn in prev_rc[project_path].get("opened", {}):
 			lineno = prev_rc[project_path]["opened"][fn]
 			lineno = int(lineno)
 			if lineno < 0:
 				lineno = 0
 			self.load_one_source(fn, lineno, True)
-		self.fs_filter_lines = prev_rc[project_path][ "fs_filter_lines" ]
-		cur_fn = prev_rc[project_path]["current_filename"]
-		cur_lineno = prev_rc[project_path]["current_lineno"]
+		self.fs_filter_lines = prev_rc[project_path].get("fs_filter_lines", [])
+		cur_fn = prev_rc[project_path].get("current_filename", "")
+		cur_lineno = prev_rc[project_path].get("current_lineno", 0)
 		if cur_fn:
 			cur_lineno = int(cur_lineno)
 			self.load_one_source(cur_fn, cur_lineno, True)
 		mi = self.xml.get_widget("menuitem_symbol_preview_switch")
-		mi.set_active(prev_rc[project_path]["preview"])
+		mi.set_active(prev_rc[project_path].get("preview", True))
 		cbox = self.xml.get_widget("cbox_side_bar")
-		cbox.set_active(prev_rc[project_path][ "outline" ])
+		cbox.set_active(prev_rc[project_path].get("outline", True))
+		mi = self.xml.get_widget("menuitem_hide_status_line")
+		mi.set_active(prev_rc[project_path].get("hide_status_line", False))
 
 	def save_current_project(self):
 		if not self.current_project_path:
@@ -986,6 +995,8 @@ class Ohh_UI:
 		saveinfo = { }
 		mi = self.xml.get_widget("menuitem_symbol_preview_switch")
 		saveinfo[ "preview" ] = mi.get_active()
+		mi = self.xml.get_widget("menuitem_hide_status_line")
+		saveinfo["hide_status_line"] = mi.get_active()
 		i = 0
 		saveinfo[ "opened" ] = {}
 		while True:
@@ -1021,6 +1032,9 @@ class Ohh_UI:
 			rc.write(str(prev_rc[uri]) + ",\n\n")
 		rc.write("}\n")
 		rc.close()
+
+	def on_hide_status_line(self, mi, *data):
+		self.show_status("")
 
 	def on_quit(self, *data):
 		self.save_current_project()
