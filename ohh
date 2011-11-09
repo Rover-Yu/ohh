@@ -1493,12 +1493,20 @@ class Ohh_UI:
 		else:
 			tv.expand_row(path, False)
 
+	def get_abs_path(self, fn):
+		prefix = self.current_project_path
+		prefix = os.path.normpath(prefix) + "/"
+		real_fn = fn
+		if fn.startswith(prefix):
+			fn = fn[len(prefix):]
+		if real_fn[0] != "/":
+			real_fn = prefix + fn
+		return real_fn
+
 	def create_result_store(self, search_type, results, fs_filter_lines):
 		"""
 			for def/ref/regex/local-regex/caller search
 		"""
-		prefix = self.current_project_path
-		prefix = os.path.normpath(prefix) + "/"
 		store = gtk.TreeStore(gobject.TYPE_STRING, gobject.TYPE_STRING,
 				gobject.TYPE_STRING, gobject.TYPE_STRING, gobject.TYPE_STRING)
 		if results:
@@ -1513,11 +1521,7 @@ class Ohh_UI:
 						kind = "unknown"
 					else:
 						kind = ""
-				real_fn = fn
-				if fn.startswith(prefix):
-					fn = fn[len(prefix):]
-				if real_fn[0] != "/":
-					real_fn = prefix + fn
+				real_fn = self.get_abs_path(fn)
 				if fs_filter_lines:
 					should_show = False
 					for fs_filter in fs_filter_lines:
@@ -1554,6 +1558,7 @@ class Ohh_UI:
 				r = results[0]
 				fn = r[0]
 				lineno = r[2]
+				fn = self.get_abs_path(fn)
 				self.load_one_source(fn, lineno)
 				return
 		res_win = gtk.Window(gtk.WINDOW_TOPLEVEL)
