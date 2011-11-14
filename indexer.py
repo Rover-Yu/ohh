@@ -432,7 +432,7 @@ class Caller(Indexer):
 					#
 					lines = file(self.cwd + "/" + ol_fn).readlines()
 					lines = lines[ol_lineno:ref_lineno+1]
-					if sym not in lines[0]:
+					if lines and sym not in lines[0]:
 						for l in lines[1:]:
 							l = l.strip()
 							if not l:	continue
