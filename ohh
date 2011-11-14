@@ -1503,6 +1503,14 @@ class Ohh_UI:
 			real_fn = prefix + fn
 		return real_fn
 
+	def get_proj_path(self, fn):
+		prefix = self.current_project_path
+		prefix = os.path.normpath(prefix) + "/"
+		fn = os.path.normpath(fn)
+		if fn.startswith(prefix):
+			fn = fn = fn[len(prefix):]
+		return fn
+
 	def create_result_store(self, search_type, results, fs_filter_lines):
 		"""
 			for def/ref/regex/local-regex/caller search
@@ -1522,6 +1530,7 @@ class Ohh_UI:
 					else:
 						kind = ""
 				real_fn = self.get_abs_path(fn)
+				fn = self.get_proj_path(fn)
 				if fs_filter_lines:
 					should_show = False
 					for fs_filter in fs_filter_lines:
