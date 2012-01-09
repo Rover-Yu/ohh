@@ -54,6 +54,7 @@ class Ohh_UI:
 		self.replaying_history = False
 		self.fs_filter_lines = []
 		self.font_name = ""
+		self.style_scheme = ""
 		glib.timeout_add(1000, self.check_search_results)
 		self.background_search_sym_results = []
 		self.background_search_sym_results_lock = threading.Lock()
@@ -856,18 +857,12 @@ class Ohh_UI:
 		sv.set_highlight_current_line(True)
 		m = gtksv.StyleSchemeManager()
 		scheme_list = m.get_scheme_ids()
-		if scheme_list:
-			try:
-				if is_preview:
-					scheme = scheme_list[-2]
-				else:
-					scheme = scheme_list[-3]
-				scheme = m.get_scheme(scheme)
-			except IndexError:
-				scheme = None
+		if self.style_scheme in scheme_list:
+			scheme = self.style_scheme
 		else:
-			scheme = None
+			scheme = ""
 		if scheme:
+			scheme = m.get_scheme(scheme)
 			buffer.set_style_scheme(scheme)
 
 		if not is_preview:
@@ -970,6 +965,7 @@ class Ohh_UI:
 		if not prev_rc.get(project_path):
 			return
 		self.font_name = prev_rc[project_path].get("font", "")
+		self.style_scheme = prev_rc[project_path].get("style_scheme", "")
 		for fn in prev_rc[project_path].get("opened", {}):
 			lineno = prev_rc[project_path]["opened"][fn]
 			lineno = int(lineno)
@@ -1012,6 +1008,7 @@ class Ohh_UI:
 		saveinfo[ "fs_filter_lines" ] = self.fs_filter_lines
 		saveinfo [ "current_filename" ] = self.get_current_filename()
 		saveinfo [ "current_lineno" ] = self.get_current_lineno()
+		saveinfo [ "style_scheme" ] = self.style_scheme
 		try:
 			rc = open("%s/.ohh.rc" % os.getenv("HOME"))
 			prev_rc = rc.read()
